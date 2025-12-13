@@ -136,11 +136,11 @@ class FlowPlay {
         // Use Dagre for proper hierarchical DAG layout (like Graphviz/Mermaid)
         const g = new dagre.graphlib.Graph();
         
-        // Set graph properties - left-to-right layout
+        // Set graph properties - top-to-bottom layout (vertical)
         g.setGraph({
-            rankdir: 'LR',  // Left to right
-            nodesep: 80,    // Horizontal separation between nodes
-            ranksep: 150,   // Vertical separation between ranks
+            rankdir: 'TB',  // Top to bottom
+            nodesep: 200,   // Horizontal separation between nodes (increased for spread)
+            ranksep: 120,   // Vertical separation between ranks
             marginx: 50,
             marginy: 50
         });

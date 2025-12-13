@@ -619,25 +619,25 @@ body {
     border-radius: 6px;
 }
 
-/* Source Type-Based Tints */
+/* Source Type-Based Tints - Opaque to match Overlay */
 .incoming-cache-panel.StartNode {
-    border-left: 4px solid var(--node-start);
-    background: linear-gradient(90deg, rgba(45, 156, 111, 0.2), rgba(15, 15, 20, 0.98) 60%);
+    border: 1px solid rgba(45, 156, 111, 0.6);
+    background: linear-gradient(135deg, rgba(35, 75, 60, 0.98), rgba(25, 50, 42, 0.98));
 }
 
 .incoming-cache-panel.ProcessNode {
-    border-left: 4px solid var(--node-process);
-    background: linear-gradient(90deg, rgba(74, 126, 184, 0.2), rgba(15, 15, 20, 0.98) 60%);
+    border: 1px solid rgba(74, 126, 184, 0.6);
+    background: linear-gradient(135deg, rgba(35, 50, 70, 0.98), rgba(28, 40, 55, 0.98));
 }
 
 .incoming-cache-panel.DecisionNode {
-    border-left: 4px solid var(--node-decision);
-    background: linear-gradient(90deg, rgba(196, 154, 60, 0.2), rgba(15, 15, 20, 0.98) 60%);
+    border: 1px solid rgba(196, 154, 60, 0.6);
+    background: linear-gradient(135deg, rgba(65, 55, 35, 0.98), rgba(50, 45, 28, 0.98));
 }
 
 .incoming-cache-panel.EndNode {
-    border-left: 4px solid var(--node-end);
-    background: linear-gradient(90deg, rgba(199, 82, 91, 0.2), rgba(15, 15, 20, 0.98) 60%);
+    border: 1px solid rgba(199, 82, 91, 0.6);
+    background: linear-gradient(135deg, rgba(65, 35, 38, 0.98), rgba(50, 28, 30, 0.98));
 }
 
 .incoming-cache-panel .incoming-source {
