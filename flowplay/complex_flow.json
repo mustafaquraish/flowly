@@ -1,0 +1,580 @@
+{
+  "name": "Server Layout Inspection",
+  "metadata": {},
+  "nodes": [
+    {
+      "id": "30d47b07-4a9a-4472-a879-a27d9c791653",
+      "type": "StartNode",
+      "label": "Alert Received: High Latency",
+      "metadata": {
+        "description": "\nAn automated alert has been triggered indicating **high latency** on one or more production servers.\n\n## Initial Information\n- Alert Source: Monitoring System (Datadog/PagerDuty)\n- Severity: P2 (High)\n- SLA: 30 minutes to acknowledge\n\n## Checklist\n- [ ] Note the timestamp of the alert\n- [ ] Check if this is a recurring issue\n- [ ] Identify affected services\n"
+      }
+    },
+    {
+      "id": "cb6b94ea-e04f-446f-bf01-b3508008bbad",
+      "type": "ProcessNode",
+      "label": "Check Server Status Dashboard",
+      "metadata": {
+        "description": "\nOpen the server status dashboard to get an overview of the system health.\n\n## Key Metrics to Check\n1. **CPU Usage**: Look for sustained >80% usage\n2. **Memory**: Check for memory pressure or OOM events\n3. **Disk I/O**: High iowait can cause latency\n4. **Network**: Check for packet loss or high latency\n\n## Tools\n- Grafana: `https://grafana.internal/d/server-health`\n- Datadog: Check the APM traces\n"
+      }
+    },
+    {
+      "id": "fecbec5d-72ad-4740-b2f1-d406ea164295",
+      "type": "DecisionNode",
+      "label": "Is Server Down?",
+      "metadata": {
+        "description": "\nDetermine if the server is completely unreachable or just experiencing degraded performance.\n\n**Down** = No response to health checks, SSH unavailable\n**Up but slow** = Responds but with high latency\n"
+      }
+    },
+    {
+      "id": "d8572d43-2334-4565-8306-e73eba292b17",
+      "type": "ProcessNode",
+      "label": "Ping Server IP",
+      "metadata": {
+        "description": "\nRun a basic network connectivity test.\n\n```bash\nping -c 5 <server_ip>\n```\n\nLook for:\n- 100% packet loss = Network issue or server down\n- High latency (>100ms) = Network congestion\n"
+      }
+    },
+    {
+      "id": "d29cf520-d052-421a-ad34-6d5ef6d6bab6",
+      "type": "DecisionNode",
+      "label": "Ping Response?",
+      "metadata": {}
+    },
+    {
+      "id": "674e4999-38fb-4e1d-a569-e8602a9b9b89",
+      "type": "ProcessNode",
+      "label": "Check Physical Power/LOM",
+      "metadata": {
+        "description": "\nAccess the Lights-Out Management (LOM) interface to check physical server status.\n\n## Steps\n1. Log into iLO/DRAC/IPMI console\n2. Check power status LED\n3. Review hardware event logs\n4. Check for any amber/red LEDs indicating failure\n"
+      }
+    },
+    {
+      "id": "bec0a549-587d-47ab-8e76-7c4a4f10bd65",
+      "type": "ProcessNode",
+      "label": "Power Cycle",
+      "metadata": {
+        "description": "\nPerform a graceful power cycle through the LOM interface.\n\n\u26a0\ufe0f **Warning**: This will cause a brief outage. Ensure:\n- Change ticket is created\n- Stakeholders are notified\n- Failover is active (if applicable)\n"
+      }
+    },
+    {
+      "id": "9d9660ad-d53e-46cf-a2f2-2999b8a785ff",
+      "type": "DecisionNode",
+      "label": "Did it recover?",
+      "metadata": {}
+    },
+    {
+      "id": "e180f1fa-f9a5-410a-9343-51e2323a977a",
+      "type": "ProcessNode",
+      "label": "Contact Data Center Ops",
+      "metadata": {
+        "description": "\nServer did not recover after power cycle. This indicates a potential hardware failure.\n\n**Contact**: DC Operations Team\n**Phone**: +1-555-DC-HELP\n**Ticket**: Create a DCOPS ticket with server details\n"
+      }
+    },
+    {
+      "id": "9ad7f3a7-4f8b-4f7e-a815-78293260c385",
+      "type": "EndNode",
+      "label": "Escalate to Hardware Team",
+      "metadata": {
+        "description": "\n# Escalation Complete\n\nThe issue has been escalated to the Hardware Team for physical intervention.\n\n**Expected Response Time**: 2-4 hours\n**Next Steps**: Monitor the DCOPS ticket for updates\n"
+      }
+    },
+    {
+      "id": "6ed57cc7-0ba4-404d-a0af-3c2263823d98",
+      "type": "ProcessNode",
+      "label": "Attempt SSH",
+      "metadata": {
+        "description": "\nTry to establish an SSH connection to the server.\n\n```bash\nssh -o ConnectTimeout=10 admin@<server_ip>\n```\n\nIf successful, proceed with OS-level diagnostics.\n"
+      }
+    },
+    {
+      "id": "0634e2ed-2402-445e-8e2a-f6d02d79624c",
+      "type": "ProcessNode",
+      "label": "Check CPU/RAM Metrics",
+      "metadata": {
+        "description": "\nRun system resource checks:\n\n```bash\ntop -bn1 | head -20\nfree -h\nvmstat 1 5\n```\n\nLook for:\n- High CPU usage by specific processes\n- Memory exhaustion / swap usage\n- I/O wait issues\n"
+      }
+    },
+    {
+      "id": "7ab3ae93-757b-4f05-803b-d4f6c04da276",
+      "type": "DecisionNode",
+      "label": "High CPU Load?",
+      "metadata": {
+        "description": "CPU usage consistently above 80%?"
+      }
+    },
+    {
+      "id": "d58b1c7a-0a59-4a8c-918b-78c4206b70db",
+      "type": "ProcessNode",
+      "label": "Identify Top Process",
+      "metadata": {
+        "description": "\nIdentify which process is consuming the most resources.\n\n```bash\nps aux --sort=-%cpu | head -10\n```\n"
+      }
+    },
+    {
+      "id": "718ec323-a657-418d-9832-dd37bf691101",
+      "type": "DecisionNode",
+      "label": "Is it main app?",
+      "metadata": {
+        "description": "Is the high-CPU process our application or something unexpected?"
+      }
+    },
+    {
+      "id": "f29a9aa4-9866-45ab-b6ba-ea92375054bb",
+      "type": "ProcessNode",
+      "label": "Restart Service",
+      "metadata": {
+        "description": "\nRestart the application service:\n\n```bash\nsystemctl restart myapp\n```\n\nMonitor logs for startup errors:\n```bash\njournalctl -u myapp -f\n```\n"
+      }
+    },
+    {
+      "id": "7b8cc9d2-0a56-4123-baff-69ec7cd741fe",
+      "type": "DecisionNode",
+      "label": "Latency Normal?",
+      "metadata": {
+        "description": "Check if latency has returned to normal levels (<100ms p99)"
+      }
+    },
+    {
+      "id": "71802c6e-88ec-4505-ac2f-a3c32516f7c2",
+      "type": "EndNode",
+      "label": "Incident Resolved",
+      "metadata": {
+        "description": "\n# \u2705 Incident Resolved\n\nThe issue has been resolved. Don't forget to:\n1. Update the incident ticket\n2. Write a brief post-mortem if needed\n3. Thank the team!\n"
+      }
+    },
+    {
+      "id": "75a70c6d-4914-4fc0-8936-d70f1bd1cd18",
+      "type": "ProcessNode",
+      "label": "Kill Suspicious Process",
+      "metadata": {
+        "description": "\n\u26a0\ufe0f **Security Alert**: Unknown process consuming resources.\n\n```bash\nkill -9 <pid>\n```\n\nPreserve evidence before killing:\n```bash\ncat /proc/<pid>/cmdline\nls -la /proc/<pid>/exe\n```\n"
+      }
+    },
+    {
+      "id": "cf2c075c-0390-4b7e-ba6c-54267d136ef6",
+      "type": "ProcessNode",
+      "label": "Flag for Security Audit",
+      "metadata": {
+        "description": "\nCreate a security incident ticket with:\n- Process details\n- Network connections (`netstat -tulpn`)\n- Recent logins (`last`)\n- Modified files (`find / -mmin -60 -type f`)\n"
+      }
+    },
+    {
+      "id": "64d4a442-cd31-4a40-9d6f-8564d23c6d99",
+      "type": "ProcessNode",
+      "label": "Check Network Bandwidth",
+      "metadata": {
+        "description": "\nCheck network utilization:\n\n```bash\niftop -i eth0\nnethogs\n```\n\nLook for unusual traffic patterns or bandwidth saturation.\n"
+      }
+    },
+    {
+      "id": "47bc53b5-eaa6-4055-958d-8a63d3b53d24",
+      "type": "DecisionNode",
+      "label": "DDoS Attack?",
+      "metadata": {
+        "description": "Signs of DDoS: unusual traffic volume, many connections from same source"
+      }
+    },
+    {
+      "id": "e5dff5a1-088d-4516-862b-9ed1177e00cc",
+      "type": "ProcessNode",
+      "label": "Enable Mitigation",
+      "metadata": {
+        "description": "\nEnable DDoS mitigation:\n\n1. Activate Cloudflare \"Under Attack\" mode\n2. Enable rate limiting\n3. Block suspicious IP ranges\n4. Contact upstream provider if needed\n"
+      }
+    },
+    {
+      "id": "d9fb4de8-8d2f-4e4d-94e6-a7c269b366d4",
+      "type": "EndNode",
+      "label": "Contact ISP / Upstream",
+      "metadata": {
+        "description": "\nNetwork issue appears to be upstream. Contact the ISP/network provider.\n\n**ISP Support**: +1-555-ISP-HELP\n**Circuit ID**: Check the network documentation\n"
+      }
+    },
+    {
+      "id": "317bf98d-8cab-4377-922c-7ef1d91b8881",
+      "type": "ProcessNode",
+      "label": "Deep Dive Logs",
+      "metadata": {
+        "description": "\nThe initial fix didn't resolve the issue. Time for deep investigation:\n\n1. Check application logs\n2. Review recent deployments\n3. Check for configuration changes\n4. Analyze database slow query logs\n"
+      }
+    }
+  ],
+  "edges": [
+    {
+      "id": "e0",
+      "source": "30d47b07-4a9a-4472-a879-a27d9c791653",
+      "target": "cb6b94ea-e04f-446f-bf01-b3508008bbad",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e1",
+      "source": "cb6b94ea-e04f-446f-bf01-b3508008bbad",
+      "target": "fecbec5d-72ad-4740-b2f1-d406ea164295",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e2",
+      "source": "fecbec5d-72ad-4740-b2f1-d406ea164295",
+      "target": "d8572d43-2334-4565-8306-e73eba292b17",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e3",
+      "source": "d8572d43-2334-4565-8306-e73eba292b17",
+      "target": "d29cf520-d052-421a-ad34-6d5ef6d6bab6",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e4",
+      "source": "d29cf520-d052-421a-ad34-6d5ef6d6bab6",
+      "target": "674e4999-38fb-4e1d-a569-e8602a9b9b89",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e5",
+      "source": "674e4999-38fb-4e1d-a569-e8602a9b9b89",
+      "target": "bec0a549-587d-47ab-8e76-7c4a4f10bd65",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e6",
+      "source": "bec0a549-587d-47ab-8e76-7c4a4f10bd65",
+      "target": "9d9660ad-d53e-46cf-a2f2-2999b8a785ff",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e7",
+      "source": "9d9660ad-d53e-46cf-a2f2-2999b8a785ff",
+      "target": "e180f1fa-f9a5-410a-9343-51e2323a977a",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e8",
+      "source": "e180f1fa-f9a5-410a-9343-51e2323a977a",
+      "target": "9ad7f3a7-4f8b-4f7e-a815-78293260c385",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e9",
+      "source": "d29cf520-d052-421a-ad34-6d5ef6d6bab6",
+      "target": "6ed57cc7-0ba4-404d-a0af-3c2263823d98",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e10",
+      "source": "9d9660ad-d53e-46cf-a2f2-2999b8a785ff",
+      "target": "6ed57cc7-0ba4-404d-a0af-3c2263823d98",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e11",
+      "source": "fecbec5d-72ad-4740-b2f1-d406ea164295",
+      "target": "0634e2ed-2402-445e-8e2a-f6d02d79624c",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e12",
+      "source": "0634e2ed-2402-445e-8e2a-f6d02d79624c",
+      "target": "7ab3ae93-757b-4f05-803b-d4f6c04da276",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e13",
+      "source": "7ab3ae93-757b-4f05-803b-d4f6c04da276",
+      "target": "d58b1c7a-0a59-4a8c-918b-78c4206b70db",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e14",
+      "source": "d58b1c7a-0a59-4a8c-918b-78c4206b70db",
+      "target": "718ec323-a657-418d-9832-dd37bf691101",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e15",
+      "source": "718ec323-a657-418d-9832-dd37bf691101",
+      "target": "f29a9aa4-9866-45ab-b6ba-ea92375054bb",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e16",
+      "source": "f29a9aa4-9866-45ab-b6ba-ea92375054bb",
+      "target": "7b8cc9d2-0a56-4123-baff-69ec7cd741fe",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e17",
+      "source": "7b8cc9d2-0a56-4123-baff-69ec7cd741fe",
+      "target": "71802c6e-88ec-4505-ac2f-a3c32516f7c2",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e18",
+      "source": "718ec323-a657-418d-9832-dd37bf691101",
+      "target": "75a70c6d-4914-4fc0-8936-d70f1bd1cd18",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e19",
+      "source": "75a70c6d-4914-4fc0-8936-d70f1bd1cd18",
+      "target": "cf2c075c-0390-4b7e-ba6c-54267d136ef6",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e20",
+      "source": "cf2c075c-0390-4b7e-ba6c-54267d136ef6",
+      "target": "7b8cc9d2-0a56-4123-baff-69ec7cd741fe",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e21",
+      "source": "7ab3ae93-757b-4f05-803b-d4f6c04da276",
+      "target": "64d4a442-cd31-4a40-9d6f-8564d23c6d99",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e22",
+      "source": "64d4a442-cd31-4a40-9d6f-8564d23c6d99",
+      "target": "47bc53b5-eaa6-4055-958d-8a63d3b53d24",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e23",
+      "source": "47bc53b5-eaa6-4055-958d-8a63d3b53d24",
+      "target": "e5dff5a1-088d-4516-862b-9ed1177e00cc",
+      "label": "Yes",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e24",
+      "source": "e5dff5a1-088d-4516-862b-9ed1177e00cc",
+      "target": "7b8cc9d2-0a56-4123-baff-69ec7cd741fe",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e25",
+      "source": "47bc53b5-eaa6-4055-958d-8a63d3b53d24",
+      "target": "d9fb4de8-8d2f-4e4d-94e6-a7c269b366d4",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e26",
+      "source": "7b8cc9d2-0a56-4123-baff-69ec7cd741fe",
+      "target": "317bf98d-8cab-4377-922c-7ef1d91b8881",
+      "label": "No",
+      "condition": null,
+      "metadata": {}
+    },
+    {
+      "id": "e27",
+      "source": "317bf98d-8cab-4377-922c-7ef1d91b8881",
+      "target": "9ad7f3a7-4f8b-4f7e-a815-78293260c385",
+      "label": null,
+      "condition": null,
+      "metadata": {}
+    }
+  ],
+  "graph": {
+    "incomingEdges": {
+      "cb6b94ea-e04f-446f-bf01-b3508008bbad": [
+        "e0"
+      ],
+      "fecbec5d-72ad-4740-b2f1-d406ea164295": [
+        "e1"
+      ],
+      "d8572d43-2334-4565-8306-e73eba292b17": [
+        "e2"
+      ],
+      "d29cf520-d052-421a-ad34-6d5ef6d6bab6": [
+        "e3"
+      ],
+      "674e4999-38fb-4e1d-a569-e8602a9b9b89": [
+        "e4"
+      ],
+      "bec0a549-587d-47ab-8e76-7c4a4f10bd65": [
+        "e5"
+      ],
+      "9d9660ad-d53e-46cf-a2f2-2999b8a785ff": [
+        "e6"
+      ],
+      "e180f1fa-f9a5-410a-9343-51e2323a977a": [
+        "e7"
+      ],
+      "9ad7f3a7-4f8b-4f7e-a815-78293260c385": [
+        "e8",
+        "e27"
+      ],
+      "6ed57cc7-0ba4-404d-a0af-3c2263823d98": [
+        "e9",
+        "e10"
+      ],
+      "0634e2ed-2402-445e-8e2a-f6d02d79624c": [
+        "e11"
+      ],
+      "7ab3ae93-757b-4f05-803b-d4f6c04da276": [
+        "e12"
+      ],
+      "d58b1c7a-0a59-4a8c-918b-78c4206b70db": [
+        "e13"
+      ],
+      "718ec323-a657-418d-9832-dd37bf691101": [
+        "e14"
+      ],
+      "f29a9aa4-9866-45ab-b6ba-ea92375054bb": [
+        "e15"
+      ],
+      "7b8cc9d2-0a56-4123-baff-69ec7cd741fe": [
+        "e16",
+        "e20",
+        "e24"
+      ],
+      "71802c6e-88ec-4505-ac2f-a3c32516f7c2": [
+        "e17"
+      ],
+      "75a70c6d-4914-4fc0-8936-d70f1bd1cd18": [
+        "e18"
+      ],
+      "cf2c075c-0390-4b7e-ba6c-54267d136ef6": [
+        "e19"
+      ],
+      "64d4a442-cd31-4a40-9d6f-8564d23c6d99": [
+        "e21"
+      ],
+      "47bc53b5-eaa6-4055-958d-8a63d3b53d24": [
+        "e22"
+      ],
+      "e5dff5a1-088d-4516-862b-9ed1177e00cc": [
+        "e23"
+      ],
+      "d9fb4de8-8d2f-4e4d-94e6-a7c269b366d4": [
+        "e25"
+      ],
+      "317bf98d-8cab-4377-922c-7ef1d91b8881": [
+        "e26"
+      ]
+    },
+    "outgoingEdges": {
+      "30d47b07-4a9a-4472-a879-a27d9c791653": [
+        "e0"
+      ],
+      "cb6b94ea-e04f-446f-bf01-b3508008bbad": [
+        "e1"
+      ],
+      "fecbec5d-72ad-4740-b2f1-d406ea164295": [
+        "e2",
+        "e11"
+      ],
+      "d8572d43-2334-4565-8306-e73eba292b17": [
+        "e3"
+      ],
+      "d29cf520-d052-421a-ad34-6d5ef6d6bab6": [
+        "e4",
+        "e9"
+      ],
+      "674e4999-38fb-4e1d-a569-e8602a9b9b89": [
+        "e5"
+      ],
+      "bec0a549-587d-47ab-8e76-7c4a4f10bd65": [
+        "e6"
+      ],
+      "9d9660ad-d53e-46cf-a2f2-2999b8a785ff": [
+        "e7",
+        "e10"
+      ],
+      "e180f1fa-f9a5-410a-9343-51e2323a977a": [
+        "e8"
+      ],
+      "0634e2ed-2402-445e-8e2a-f6d02d79624c": [
+        "e12"
+      ],
+      "7ab3ae93-757b-4f05-803b-d4f6c04da276": [
+        "e13",
+        "e21"
+      ],
+      "d58b1c7a-0a59-4a8c-918b-78c4206b70db": [
+        "e14"
+      ],
+      "718ec323-a657-418d-9832-dd37bf691101": [
+        "e15",
+        "e18"
+      ],
+      "f29a9aa4-9866-45ab-b6ba-ea92375054bb": [
+        "e16"
+      ],
+      "7b8cc9d2-0a56-4123-baff-69ec7cd741fe": [
+        "e17",
+        "e26"
+      ],
+      "75a70c6d-4914-4fc0-8936-d70f1bd1cd18": [
+        "e19"
+      ],
+      "cf2c075c-0390-4b7e-ba6c-54267d136ef6": [
+        "e20"
+      ],
+      "64d4a442-cd31-4a40-9d6f-8564d23c6d99": [
+        "e22"
+      ],
+      "47bc53b5-eaa6-4055-958d-8a63d3b53d24": [
+        "e23",
+        "e25"
+      ],
+      "e5dff5a1-088d-4516-862b-9ed1177e00cc": [
+        "e24"
+      ],
+      "317bf98d-8cab-4377-922c-7ef1d91b8881": [
+        "e27"
+      ]
+    }
+  }
+}

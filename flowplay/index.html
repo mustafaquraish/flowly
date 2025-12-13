@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowPlay - Interactive Flowchart Visualizer</title>
+    <meta name="description" content="Interactive flowchart visualizer with game-mode navigation and K/V cache system">
+    <link rel="stylesheet" href="styles.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+</head>
+<body>
+    <div id="app">
+        <!-- Main flowchart visualization -->
+        <div id="flowchart-container">
+            <svg id="flowchart-svg"></svg>
+            <!-- Node detail overlay - positioned over current node -->
+            <div id="node-overlay" class="node-overlay hidden">
+                <div class="overlay-header">
+                    <span class="node-badge" id="overlay-badge">NODE</span>
+                    <h3 id="overlay-title">Node Title</h3>
+                </div>
+                <div class="overlay-description" id="overlay-description"></div>
+                <div class="overlay-cache">
+                    <div class="section-header">
+                        <span>Cache</span>
+                        <button id="overlay-add-cache" class="add-cache-btn">+</button>
+                    </div>
+                    <div class="cache-entries" id="overlay-cache-entries"></div>
+                </div>
+                <div class="overlay-actions" id="overlay-actions"></div>
+            </div>
+        </div>
+
+        <!-- Incoming caches container (floating near edges) -->
+        <div id="incoming-caches-container">
+            <!-- Dynamically created cache panels will appear here -->
+        </div>
+
+        <!-- Controls -->
+        <div id="controls">
+            <button id="restart-btn" class="btn btn-secondary">↺ Restart</button>
+            <button id="zoom-in" class="btn btn-secondary">+</button>
+            <button id="zoom-out" class="btn btn-secondary">-</button>
+            <button id="fit-view" class="btn btn-secondary">⛶</button>
+        </div>
+        
+        <!-- Global Cache UI -->
+        <button id="global-cache-toggle">Global Data</button>
+        <div id="global-cache-panel" class="hidden glass-panel">
+            <div class="section-header">Global Data Store</div>
+            <div id="global-cache-entries" class="panel-content">
+                <!-- Populated by JS -->
+            </div>
+        </div>
+
+        <!-- Flow title -->
+        <div id="flow-title" class="glass-panel">
+            <h1 id="flowchart-name">Loading...</h1>
+        </div>
+
+        <!-- History trail -->
+        <div id="history-panel" class="glass-panel">
+            <div id="history-trail"></div>
+        </div>
+    </div>
+
+    <script src="app.js"></script>
+</body>
+</html>
+

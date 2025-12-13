@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "flowly"
+version = "0.1.0"
+description = "A flexible flowchart library with IR, execution engine, and serialization."
+authors = [
+    {name = "User", email = "user@example.com"},
+]
+dependencies = [
+    "graphviz"
+]
+requires-python = ">=3.8"
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "mypy",
+    "black",
+    "flake8"
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = "test_*.py"
