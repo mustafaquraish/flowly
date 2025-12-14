@@ -3,10 +3,41 @@
  * Main Application Logic
  */
 
+// =========================================
+// UTILITY FUNCTIONS
+// =========================================
+
 /**
- * Singleton DragManager - handles document-level drag listeners
- * to avoid accumulating listeners per draggable element
+ * Escape HTML special characters
  */
+function escapeHtml(str) {
+  if (typeof str !== "string") return str;
+  return str
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * Format node type for display (e.g., "ProcessNode" -> "PROCESS")
+ */
+function formatNodeType(type) {
+  return type.replace("Node", "").toUpperCase();
+}
+
+/**
+ * Truncate a label to a maximum length
+ */
+function truncateLabel(label, maxLength) {
+  if (label.length <= maxLength) return label;
+  return label.substring(0, maxLength - 2) + "...";
+}
+
+// =========================================
+// DRAG MANAGER (Singleton)
+// =========================================
+
 const DragManager = {
   activeElement: null,
   startX: 0,
@@ -17,12 +48,8 @@ const DragManager = {
   init() {
     document.addEventListener("mousemove", (e) => {
       if (!this.activeElement) return;
-
-      const dx = e.clientX - this.startX;
-      const dy = e.clientY - this.startY;
-
-      this.activeElement.style.left = `${this.initialLeft + dx}px`;
-      this.activeElement.style.top = `${this.initialTop + dy}px`;
+      this.activeElement.style.left = `${this.initialLeft + e.clientX - this.startX}px`;
+      this.activeElement.style.top = `${this.initialTop + e.clientY - this.startY}px`;
     });
 
     document.addEventListener("mouseup", () => {
@@ -43,8 +70,235 @@ const DragManager = {
   },
 };
 
-// Initialize DragManager once
 DragManager.init();
+
+// =========================================
+// SETTINGS MANAGER
+// =========================================
+
+const SettingsManager = {
+  defaults: {
+    showMiniMap: true,
+    showProgressIndicator: true,
+    showNodePreview: true,
+    darkMode: true,
+    animatedEdges: true,
+    autoHideControls: true,
+    autoSaveState: true,
+    defaultZoomLevel: 1.6,
+  },
+
+  current: null,
+
+  load() {
+    try {
+      const saved = localStorage.getItem("flowplay_settings");
+      this.current = { ...this.defaults, ...(saved ? JSON.parse(saved) : {}) };
+    } catch (e) {
+      console.warn("Failed to load settings:", e);
+      this.current = { ...this.defaults };
+    }
+    return this.current;
+  },
+
+  save() {
+    try {
+      localStorage.setItem("flowplay_settings", JSON.stringify(this.current));
+    } catch (e) {
+      console.warn("Failed to save settings:", e);
+    }
+  },
+
+  set(key, value) {
+    if (this.current.hasOwnProperty(key)) {
+      this.current[key] = value;
+      this.save();
+    }
+  },
+
+  get(key) {
+    return this.current?.[key] ?? this.defaults[key];
+  },
+};
+
+// =========================================
+// FLOW STATE MANAGER
+// =========================================
+
+const FlowState = {
+  // Flow data (loaded from JSON)
+  flowData: null,
+  nodes: {},
+  edges: {},
+  graph: null,
+
+  // Navigation state
+  currentNode: null,
+  history: [],
+  historyIndex: -1,
+  visitedNodes: new Set(),
+
+  // Caches
+  nodeCache: new Map(),
+  globalCache: {},
+
+  // User zoom preference
+  userZoomLevel: null,
+
+  /**
+   * Initialize state from flow data
+   */
+  init(flowData) {
+    this.flowData = flowData;
+    this.nodes = {};
+    this.edges = {};
+    
+    flowData.nodes.forEach((node) => {
+      this.nodes[node.id] = node;
+    });
+    flowData.edges.forEach((edge) => {
+      this.edges[edge.id] = edge;
+    });
+    this.graph = flowData.graph;
+  },
+
+  /**
+   * Reset all navigation state
+   */
+  reset() {
+    this.currentNode = null;
+    this.history = [];
+    this.historyIndex = -1;
+    this.visitedNodes.clear();
+    this.nodeCache.clear();
+    this.userZoomLevel = null;
+  },
+
+  /**
+   * Navigate to a node, updating history
+   */
+  navigateTo(nodeId) {
+    const node = this.nodes[nodeId];
+    if (!node) return null;
+
+    // Update history
+    if (this.historyIndex < this.history.length - 1 &&
+        this.history[this.historyIndex + 1] === nodeId) {
+      this.historyIndex++;
+    } else {
+      this.history = this.history.slice(0, this.historyIndex + 1);
+      this.history.push(nodeId);
+      this.historyIndex = this.history.length - 1;
+    }
+
+    // Mark previous node as visited
+    if (this.currentNode) {
+      this.visitedNodes.add(this.currentNode.id);
+    }
+
+    this.currentNode = node;
+    return node;
+  },
+
+  /**
+   * Time travel to a specific history index
+   */
+  timeTravel(index) {
+    if (index < 0 || index >= this.history.length || index === this.historyIndex) {
+      return null;
+    }
+    this.historyIndex = index;
+    this.currentNode = this.nodes[this.history[index]];
+    return this.currentNode;
+  },
+
+  /**
+   * Go back in history
+   */
+  goBack() {
+    return this.historyIndex > 0 ? this.timeTravel(this.historyIndex - 1) : null;
+  },
+
+  /**
+   * Get start node
+   */
+  getStartNode() {
+    return this.flowData?.nodes.find((n) => n.type === "StartNode") || null;
+  },
+
+  /**
+   * Save state to localStorage
+   */
+  saveToStorage() {
+    if (!this.flowData) return;
+    const state = {
+      flowName: this.flowData.name,
+      currentNodeId: this.currentNode?.id,
+      history: this.history,
+      historyIndex: this.historyIndex,
+      visitedNodes: Array.from(this.visitedNodes),
+      globalCache: this.globalCache,
+      nodeCache: Object.fromEntries(this.nodeCache),
+    };
+    try {
+      localStorage.setItem(`flowplay_${this.flowData.name}`, JSON.stringify(state));
+    } catch (e) {
+      console.warn("Failed to save state:", e);
+    }
+  },
+
+  /**
+   * Load state from localStorage
+   */
+  loadFromStorage() {
+    if (!this.flowData) return false;
+    try {
+      const saved = localStorage.getItem(`flowplay_${this.flowData.name}`);
+      if (!saved) return false;
+
+      const state = JSON.parse(saved);
+      if (state.flowName !== this.flowData.name) return false;
+
+      this.history = state.history || [];
+      this.historyIndex = state.historyIndex ?? -1;
+      this.visitedNodes = new Set(state.visitedNodes || []);
+      this.globalCache = state.globalCache || {};
+      this.nodeCache = new Map(Object.entries(state.nodeCache || {}));
+
+      if (state.currentNodeId && this.nodes[state.currentNodeId]) {
+        this.currentNode = this.nodes[state.currentNodeId];
+        return true;
+      }
+    } catch (e) {
+      console.warn("Failed to load state:", e);
+    }
+    return false;
+  },
+
+  /**
+   * Clear saved state
+   */
+  clearStorage() {
+    if (this.flowData) {
+      localStorage.removeItem(`flowplay_${this.flowData.name}`);
+    }
+  },
+
+  /**
+   * Get/set node cache
+   */
+  getNodeCache(nodeId) {
+    return this.nodeCache.get(nodeId) || {};
+  },
+
+  setNodeCache(nodeId, cache) {
+    this.nodeCache.set(nodeId, cache);
+  },
+};
+
+// =========================================
+// CACHE EDITOR HELPERS
+// =========================================
 
 /**
  * Unified cache editor helper functions.
@@ -146,58 +400,45 @@ const CacheEditorHelpers = {
 
 class FlowPlay {
   constructor() {
-    // Flow data
-    this.flowData = null;
-    this.nodes = {};
-    this.edges = {};
-    this.graph = null;
-
-    // Navigation state
-    this.currentNode = null;
-    this.history = [];
-    this.historyIndex = -1; // Current position in history for time-travel
-    this.visitedNodes = new Set();
-    this.historyExpanded = false;
-
-    // K/V Cache per node
-    this.nodeCache = new Map();
-    this.globalCache = {};
-
-    // D3 elements
-    this.svg = null;
-
     // Configuration
     this.nodeWidth = 160;
     this.nodeHeight = 70;
 
+    // D3 elements
+    this.svg = null;
+    this.g = null;
+    this.zoom = null;
+
     // UI state
     this.searchResults = [];
     this.searchSelectedIndex = -1;
-    this.selectedHistoryIndex = -1; // For keyboard navigation in history panel
+    this.selectedHistoryIndex = -1;
+    this.selectedEdgeIndex = 0;
     this.nodePreviewTooltip = null;
-    this.edgeLabelTooltip = null;
     this.autoHideTimeout = null;
+    this.zoomTrackTimeout = null;
     this.lastInteractionTime = Date.now();
 
-    // Settings (with defaults)
-    this.settings = {
-      showMiniMap: true,
-      showProgressIndicator: true,
-      showNodePreview: true,
-      showEdgeLabels: true,
-      darkMode: true,
-      animatedEdges: true,
-      autoHideControls: true,
-      autoSaveState: true,
-      confirmNavigation: false,
-      defaultZoomLevel: 1.6,
-    };
-    this.userZoomLevel = null; // User-customized zoom level (set when manually zooming)
-    this.loadSettings();
+    // Load settings
+    this.settings = SettingsManager.load();
 
     // Bind methods
     this.handleZoom = this.handleZoom.bind(this);
   }
+
+  // Convenience accessors for FlowState
+  get flowData() { return FlowState.flowData; }
+  get nodes() { return FlowState.nodes; }
+  get edges() { return FlowState.edges; }
+  get graph() { return FlowState.graph; }
+  get currentNode() { return FlowState.currentNode; }
+  get history() { return FlowState.history; }
+  get historyIndex() { return FlowState.historyIndex; }
+  get visitedNodes() { return FlowState.visitedNodes; }
+  get nodeCache() { return FlowState.nodeCache; }
+  get globalCache() { return FlowState.globalCache; }
+  get userZoomLevel() { return FlowState.userZoomLevel; }
+  set userZoomLevel(value) { FlowState.userZoomLevel = value; }
 
   async init() {
     try {
@@ -206,7 +447,6 @@ class FlowPlay {
       this.setupSVG();
       this.renderFlowchart();
       this.setupControls();
-      this.setupOverlayControls();
       this.setupSearch();
       this.setupMiniMap();
       this.setupNodePreview();
@@ -242,42 +482,33 @@ class FlowPlay {
   }
 
   async loadFlowData() {
+    let flowData = null;
     let errorMessage = "Failed to load flowchart";
+    
     try {
       const response = await fetch("./complex_flow.json");
-      if (!response.ok) {
-        errorMessage = `Failed to load flowchart: ${response.statusText}`;
-        this.flowData =
-          typeof bundledFlowData !== "undefined" ? bundledFlowData : null;
-        if (!this.flowData) {
-          throw new Error(errorMessage);
-        } else {
-          console.log("Using bundled json data!");
-        }
-      } else {
-        this.flowData = await response.json();
+      if (response.ok) {
+        flowData = await response.json();
       }
     } catch (e) {
-      this.flowData =
-        typeof bundledFlowData !== "undefined" ? bundledFlowData : null;
-      if (!this.flowData) {
-        throw new Error(errorMessage);
-      } else {
+      // Fall through to bundled data
+    }
+
+    // Try bundled data as fallback
+    if (!flowData) {
+      flowData = typeof bundledFlowData !== "undefined" ? bundledFlowData : null;
+      if (flowData) {
         console.log("Using bundled json data!");
+      } else {
+        throw new Error(errorMessage);
       }
     }
 
-    // Index nodes and edges
-    this.flowData.nodes.forEach((node) => {
-      this.nodes[node.id] = node;
-    });
-    this.flowData.edges.forEach((edge) => {
-      this.edges[edge.id] = edge;
-    });
-    this.graph = this.flowData.graph;
+    // Initialize state with flow data
+    FlowState.init(flowData);
 
     // Set title
-    document.getElementById("flowchart-name").textContent = this.flowData.name;
+    document.getElementById("flowchart-name").textContent = flowData.name;
   }
 
   setupSVG() {
@@ -566,16 +797,21 @@ class FlowPlay {
     this.fitToView();
   }
 
-  calculateEdgePath(source, target) {
+  /**
+   * Calculate edge path between two nodes.
+   * @param {Object} source - Source node
+   * @param {Object} target - Target node
+   * @param {Object} [sourceDims] - Override dimensions for source {width, height}
+   * @param {Object} [targetDims] - Override dimensions for target {width, height}
+   */
+  calculateEdgePath(source, target, sourceDims = null, targetDims = null) {
     const dx = target.x - source.x;
     const dy = target.y - source.y;
     const angle = Math.atan2(dy, dx);
 
-    // Calculate intersection points with node boundaries
-    const sourcePoint = this.getNodeEdgePoint(source, angle);
-    const targetPoint = this.getNodeEdgePoint(target, angle + Math.PI); // opposite direction
+    const sourcePoint = this.getNodeEdgePoint(source, angle, sourceDims);
+    const targetPoint = this.getNodeEdgePoint(target, angle + Math.PI, targetDims);
 
-    // Curved path
     const midX = (sourcePoint.x + targetPoint.x) / 2;
     const midY = (sourcePoint.y + targetPoint.y) / 2;
 
@@ -583,16 +819,18 @@ class FlowPlay {
   }
 
   /**
-   * Calculate the point on the edge of a node where an edge should connect
-   * Handles different node shapes: rectangle, rounded rect, and diamond
+   * Calculate the point on the edge of a node where an edge should connect.
+   * Handles different node shapes: rectangle, rounded rect, and diamond.
+   * @param {Object} node - The node object
+   * @param {number} angle - The angle from node center
+   * @param {Object} [dims] - Override dimensions {width, height}
    */
-  getNodeEdgePoint(node, angle) {
-    const halfWidth = this.nodeWidth / 2;
-    const halfHeight = this.nodeHeight / 2;
+  getNodeEdgePoint(node, angle, dims = null) {
+    const halfWidth = (dims?.width ?? this.nodeWidth) / 2;
+    const halfHeight = (dims?.height ?? this.nodeHeight) / 2;
 
-    if (node.type === "DecisionNode") {
-      // Diamond shape: points at 0, 90, 180, 270 degrees
-      // Diamond extends: left/right by size*2, top/bottom by size
+    if (node.type === "DecisionNode" && !dims) {
+      // Diamond shape only when using default dimensions
       const size = 50;
       const diamondHalfWidth = size * 2;
       const diamondHalfHeight = size;
@@ -651,11 +889,6 @@ class FlowPlay {
         y: node.y + t * sin,
       };
     }
-  }
-
-  truncateLabel(label, maxLength) {
-    if (label.length <= maxLength) return label;
-    return label.substring(0, maxLength - 2) + "...";
   }
 
   setupControls() {
@@ -842,10 +1075,6 @@ class FlowPlay {
 
     this.setupGlobalCache();
     this.setupHistoryPanel();
-  }
-
-  setupOverlayControls() {
-    // No close button - user uses Escape or Z to zoom out
   }
 
   setupHistoryPanel() {
@@ -1074,7 +1303,7 @@ class FlowPlay {
                     ? "decision"
                     : "process"
                 })"></div>
-                <span class="node-name">${this.escapeHtml(node.label)}</span>
+                <span class="node-name">${escapeHtml(node.label)}</span>
                 <span class="node-id">${node.id}</span>
             </div>
         `
@@ -1269,17 +1498,11 @@ class FlowPlay {
   // NODE PREVIEW TOOLTIP
   // =========================================
   setupNodePreview() {
-    // Create tooltip element
+    // Create tooltip element for node previews and edge hover
     this.nodePreviewTooltip = document.createElement("div");
     this.nodePreviewTooltip.className = "node-preview-tooltip";
     this.nodePreviewTooltip.style.display = "none";
     document.body.appendChild(this.nodePreviewTooltip);
-
-    // Create edge label tooltip
-    this.edgeLabelTooltip = document.createElement("div");
-    this.edgeLabelTooltip.className = "edge-label-tooltip";
-    this.edgeLabelTooltip.style.display = "none";
-    document.body.appendChild(this.edgeLabelTooltip);
   }
 
   showNodePreview(node, event) {
@@ -1296,16 +1519,16 @@ class FlowPlay {
 
     tooltip.innerHTML = `
             <div class="preview-header">
-                <span class="preview-badge ${node.type}">${this.formatNodeType(
+                <span class="preview-badge ${node.type}">${formatNodeType(
       node.type
     )}</span>
-                <span class="preview-title">${this.escapeHtml(
+                <span class="preview-title">${escapeHtml(
                   node.label
                 )}</span>
             </div>
             ${
               shortDesc
-                ? `<div class="preview-description">${this.escapeHtml(
+                ? `<div class="preview-description">${escapeHtml(
                     shortDesc
                   )}</div>`
                 : ""
@@ -1320,21 +1543,6 @@ class FlowPlay {
   hideNodePreview() {
     if (this.nodePreviewTooltip) {
       this.nodePreviewTooltip.style.display = "none";
-    }
-  }
-
-  showEdgeLabelTooltip(edge, event) {
-    const tooltip = this.edgeLabelTooltip;
-    if (!tooltip || !edge.label) return;
-
-    tooltip.textContent = edge.label;
-    tooltip.style.display = "block";
-    this.clampToViewport(tooltip, event.clientX, event.clientY, 10);
-  }
-
-  hideEdgeLabelTooltip() {
-    if (this.edgeLabelTooltip) {
-      this.edgeLabelTooltip.style.display = "none";
     }
   }
 
@@ -1357,7 +1565,7 @@ class FlowPlay {
     // Build combined tooltip content
     let labelHtml = "";
     if (edge.label) {
-      labelHtml = `<div class="edge-label-preview">${this.escapeHtml(
+      labelHtml = `<div class="edge-label-preview">${escapeHtml(
         edge.label
       )}</div>`;
     }
@@ -1367,14 +1575,14 @@ class FlowPlay {
             <div class="preview-header">
                 <span class="preview-badge ${
                   targetNode.type
-                }">${this.formatNodeType(targetNode.type)}</span>
-                <span class="preview-title">${this.escapeHtml(
+                }">${formatNodeType(targetNode.type)}</span>
+                <span class="preview-title">${escapeHtml(
                   targetNode.label
                 )}</span>
             </div>
             ${
               shortDesc
-                ? `<div class="preview-description">${this.escapeHtml(
+                ? `<div class="preview-description">${escapeHtml(
                     shortDesc
                   )}</div>`
                 : ""
@@ -1389,9 +1597,6 @@ class FlowPlay {
   hideEdgeNodeTooltip() {
     if (this.nodePreviewTooltip) {
       this.nodePreviewTooltip.style.display = "none";
-    }
-    if (this.edgeLabelTooltip) {
-      this.edgeLabelTooltip.style.display = "none";
     }
   }
 
@@ -1501,17 +1706,6 @@ class FlowPlay {
         15
       );
     }
-    if (
-      this.edgeLabelTooltip &&
-      this.edgeLabelTooltip.style.display !== "none"
-    ) {
-      this.clampToViewport(
-        this.edgeLabelTooltip,
-        event.clientX,
-        event.clientY,
-        10
-      );
-    }
   }
 
   // =========================================
@@ -1560,12 +1754,17 @@ class FlowPlay {
 
   start() {
     // Try to restore saved state first
-    if (this.loadState()) {
+    if (FlowState.loadFromStorage()) {
+      // Restore visited visual state
+      this.visitedNodes.forEach((nodeId) => {
+        d3.select(`#node-${nodeId}`).classed("visited", true);
+      });
+      this.goToNode(this.currentNode, null, false);
       return;
     }
 
     // Otherwise, find start node
-    const startNode = this.flowData.nodes.find((n) => n.type === "StartNode");
+    const startNode = FlowState.getStartNode();
     if (startNode) {
       this.navigateToNode(startNode.id);
     }
@@ -1573,14 +1772,8 @@ class FlowPlay {
 
   restart() {
     // Clear state
-    this.history = [];
-    this.historyIndex = -1;
-    this.visitedNodes.clear();
-    this.nodeCache.clear();
-    this.userZoomLevel = null; // Reset custom zoom
-
-    // Clear saved state
-    this.clearSavedState();
+    FlowState.reset();
+    FlowState.clearStorage();
 
     // Reset visual state
     this.g
@@ -1601,37 +1794,19 @@ class FlowPlay {
   }
 
   navigateToNode(nodeId) {
-    const node = this.nodes[nodeId];
+    const prevNode = this.currentNode;
+    const node = FlowState.navigateTo(nodeId);
     if (!node) return;
-
-    // Fork history: only truncate if navigating to a DIFFERENT node than what's next in history
-    if (this.historyIndex < this.history.length - 1) {
-      // Check if next item in history is the same node we're going to
-      if (this.history[this.historyIndex + 1] === nodeId) {
-        // Same node - just move forward in history without adding
-        this.historyIndex = this.historyIndex + 1;
-      } else {
-        // Different node - truncate future and add new path
-        this.history = this.history.slice(0, this.historyIndex + 1);
-        this.history.push(nodeId);
-        this.historyIndex = this.history.length - 1;
-      }
-    } else {
-      // At the end of history, add new node
-      this.history.push(nodeId);
-      this.historyIndex = this.history.length - 1;
-    }
-
-    // Use shared navigation logic
-    this.goToNode(node, true);
+    this.goToNode(node, prevNode, true);
   }
 
   /**
    * Core navigation function - handles all the visual/state updates for going to a node
    * @param {Object} node - The node object to navigate to
+   * @param {Object} prevNode - The previous current node (may be null)
    * @param {boolean} addToVisited - Whether to mark the previous node as visited
    */
-  goToNode(node, addToVisited = true) {
+  goToNode(node, prevNode = null, addToVisited = true) {
     // Reset keyboard edge selection to first edge
     this.selectedEdgeIndex = 0;
 
@@ -1642,22 +1817,13 @@ class FlowPlay {
     this.hideNodePreview();
 
     // Restore visibility of previous node's collapsed shape and reset edge paths
-    if (this.currentNode) {
-      d3.select(`#node-${this.currentNode.id} .node-collapsed`).style(
-        "opacity",
-        1
-      );
-      if (addToVisited) {
-        this.visitedNodes.add(this.currentNode.id);
-      }
-      d3.select(`#node-${this.currentNode.id}`)
+    if (prevNode) {
+      d3.select(`#node-${prevNode.id} .node-collapsed`).style("opacity", 1);
+      d3.select(`#node-${prevNode.id}`)
         .classed("current", false)
         .classed("visited", true);
-      // Reset edge paths for the old current node
-      this.resetEdgesForNode(this.currentNode.id);
+      this.resetEdgesForNode(prevNode.id);
     }
-
-    this.currentNode = node;
 
     // Update visual state
     d3.select(`#node-${node.id}`).classed("current", true);
@@ -1672,7 +1838,7 @@ class FlowPlay {
     this.renderMiniMap();
 
     // Save state to localStorage
-    this.saveState();
+    FlowState.saveToStorage();
 
     // Zoom to node (overlay shown after zoom completes)
     this.zoomToNode(node);
@@ -1784,134 +1950,36 @@ class FlowPlay {
   updateEdgesForExpandedNode(overlay) {
     if (!this.currentNode) return;
 
-    // Get overlay dimensions and convert to SVG coordinate space
-    // The overlay is scaled by transform.k / 1.6, so in SVG space it's overlaySize / 1.6
-    const overlayWidth = overlay.offsetWidth / 1.6;
-    const overlayHeight = overlay.offsetHeight / 1.6;
+    // Get overlay dimensions in SVG coordinate space (scaled by 1/1.6)
+    const expandedDims = {
+      width: overlay.offsetWidth / 1.6,
+      height: overlay.offsetHeight / 1.6,
+    };
 
     const nodeId = this.currentNode.id;
-
-    // Get all edges connected to the current node
     const incomingEdgeIds = this.graph.incomingEdges[nodeId] || [];
     const outgoingEdgeIds = this.graph.outgoingEdges[nodeId] || [];
 
-    // Update incoming edges (target is current node)
+    // Update incoming edges (target is current node - use expanded dims for target)
     incomingEdgeIds.forEach((edgeId) => {
       const edge = this.edges[edgeId];
       const source = this.nodes[edge.source];
-      const path = this.calculateEdgePathWithExpandedTarget(
-        source,
-        this.currentNode,
-        overlayWidth,
-        overlayHeight
-      );
-
+      const path = this.calculateEdgePath(source, this.currentNode, null, expandedDims);
       d3.select(`#edge-${edgeId}`).attr("d", path);
       d3.select(`#edge-hit-${edgeId}`).attr("d", path);
     });
 
-    // Update outgoing edges (source is current node)
+    // Update outgoing edges (source is current node - use expanded dims for source)
     outgoingEdgeIds.forEach((edgeId) => {
       const edge = this.edges[edgeId];
       const target = this.nodes[edge.target];
-      const path = this.calculateEdgePathWithExpandedSource(
-        this.currentNode,
-        target,
-        overlayWidth,
-        overlayHeight
-      );
-
+      const path = this.calculateEdgePath(this.currentNode, target, expandedDims, null);
       d3.select(`#edge-${edgeId}`).attr("d", path);
       d3.select(`#edge-hit-${edgeId}`).attr("d", path);
     });
   }
 
-  /**
-   * Calculate edge path when the source node is expanded
-   */
-  calculateEdgePathWithExpandedSource(
-    source,
-    target,
-    expandedWidth,
-    expandedHeight
-  ) {
-    const dx = target.x - source.x;
-    const dy = target.y - source.y;
-    const angle = Math.atan2(dy, dx);
-
-    // Source uses expanded dimensions
-    const sourcePoint = this.getExpandedNodeEdgePoint(
-      source,
-      angle,
-      expandedWidth,
-      expandedHeight
-    );
-    // Target uses normal dimensions
-    const targetPoint = this.getNodeEdgePoint(target, angle + Math.PI);
-
-    const midX = (sourcePoint.x + targetPoint.x) / 2;
-    const midY = (sourcePoint.y + targetPoint.y) / 2;
-
-    return `M${sourcePoint.x},${sourcePoint.y} Q${midX},${midY} ${targetPoint.x},${targetPoint.y}`;
-  }
-
-  /**
-   * Calculate edge path when the target node is expanded
-   */
-  calculateEdgePathWithExpandedTarget(
-    source,
-    target,
-    expandedWidth,
-    expandedHeight
-  ) {
-    const dx = target.x - source.x;
-    const dy = target.y - source.y;
-    const angle = Math.atan2(dy, dx);
-
-    // Source uses normal dimensions
-    const sourcePoint = this.getNodeEdgePoint(source, angle);
-    // Target uses expanded dimensions
-    const targetPoint = this.getExpandedNodeEdgePoint(
-      target,
-      angle + Math.PI,
-      expandedWidth,
-      expandedHeight
-    );
-
-    const midX = (sourcePoint.x + targetPoint.x) / 2;
-    const midY = (sourcePoint.y + targetPoint.y) / 2;
-
-    return `M${sourcePoint.x},${sourcePoint.y} Q${midX},${midY} ${targetPoint.x},${targetPoint.y}`;
-  }
-
-  /**
-   * Get edge point for an expanded (overlay) node - always rectangular
-   */
-  getExpandedNodeEdgePoint(node, angle, expandedWidth, expandedHeight) {
-    const halfWidth = expandedWidth / 2;
-    const halfHeight = expandedHeight / 2;
-
-    const cos = Math.cos(angle);
-    const sin = Math.sin(angle);
-
-    // Find intersection with rectangle boundary
-    let tx = Infinity,
-      ty = Infinity;
-
-    if (cos !== 0) {
-      tx = (cos > 0 ? halfWidth : -halfWidth) / cos;
-    }
-    if (sin !== 0) {
-      ty = (sin > 0 ? halfHeight : -halfHeight) / sin;
-    }
-
-    const t = Math.min(Math.abs(tx), Math.abs(ty));
-
-    return {
-      x: node.x + t * cos,
-      y: node.y + t * sin,
-    };
-  }
+  // Edge path methods unified - see calculateEdgePath() above
 
   updateCurrentNodePanel() {
     const overlay = document.getElementById("node-overlay");
@@ -1919,7 +1987,7 @@ class FlowPlay {
 
     // Update type badge
     const badge = document.getElementById("overlay-badge");
-    badge.textContent = this.formatNodeType(node.type);
+    badge.textContent = formatNodeType(node.type);
     badge.className = `node-badge ${node.type}`;
 
     // Update title
@@ -1960,7 +2028,7 @@ class FlowPlay {
     container.innerHTML = CacheEditorHelpers.generateRows(
       cache,
       "Add key...",
-      this.escapeHtml.bind(this)
+      escapeHtml
     );
 
     // Use event delegation - attach once to container instead of per-element
@@ -1994,7 +2062,7 @@ class FlowPlay {
       const label = edge.label || "Continue";
       const shortcutHint =
         index < 9 ? `<span class="shortcut-hint">${index + 1}</span>` : "";
-      btn.innerHTML = `${shortcutHint}<span class="arrow">→</span>${label}<span class="target">${this.truncateLabel(
+      btn.innerHTML = `${shortcutHint}<span class="arrow">→</span>${label}<span class="target">${truncateLabel(
         targetNode.label,
         20
       )}</span>`;
@@ -2007,130 +2075,81 @@ class FlowPlay {
     });
   }
 
-  formatNodeType(type) {
-    return type.replace("Node", "").toUpperCase();
-  }
-
-  escapeHtml(str) {
-    if (typeof str !== "string") return str;
-    const div = document.createElement("div");
-    div.textContent = str;
-    return div.innerHTML;
-  }
-
   /**
-   * Sets up event delegation for cache editors (handles both node and global cache)
+   * Sets up event delegation for cache editors (handles both node and global cache).
+   * Uses a marker to avoid duplicate listener setup.
    * @param {HTMLElement} container - The container element for cache rows
    * @param {string} cacheType - 'node' or 'global'
    */
   setupCacheEditorDelegation(container, cacheType) {
-    // Remove any existing listeners by cloning (event delegation means we set once)
-    const newContainer = container.cloneNode(true);
-    container.parentNode.replaceChild(newContainer, container);
+    // Skip if already set up for this cache type
+    if (container.dataset.cacheType === cacheType) return;
+    container.dataset.cacheType = cacheType;
 
     // Input event delegation
-    newContainer.addEventListener("input", (e) => {
+    container.addEventListener("input", (e) => {
       if (
-        e.target.classList.contains("cache-key") ||
-        e.target.classList.contains("cache-value")
-      ) {
-        const cache =
-          cacheType === "node"
-            ? this.nodeCache.get(this.currentNode.id) || {}
-            : this.globalCache;
-        const keyPrefix = cacheType === "node" ? "key_" : "global_";
+        !e.target.classList.contains("cache-key") &&
+        !e.target.classList.contains("cache-value")
+      ) return;
 
-        const needsRerender = CacheEditorHelpers.handleEdit(
-          e,
-          cache,
-          keyPrefix
-        );
+      const cache =
+        cacheType === "node"
+          ? this.nodeCache.get(this.currentNode.id) || {}
+          : this.globalCache;
+      const keyPrefix = cacheType === "node" ? "key_" : "global_";
 
-        if (cacheType === "node") {
-          this.nodeCache.set(this.currentNode.id, cache);
-        }
+      const needsRerender = CacheEditorHelpers.handleEdit(e, cache, keyPrefix);
 
-        if (needsRerender) {
-          const input = e.target;
-          const renderFn =
-            cacheType === "node" ? "renderOverlayData" : "renderGlobalCache";
-          this[renderFn]();
+      if (cacheType === "node") {
+        this.nodeCache.set(this.currentNode.id, cache);
+      }
 
-          // Focus restoration after re-render
-          const containerSelector =
-            cacheType === "node"
-              ? "#overlay-cache-entries"
-              : "#global-cache-entries";
-          const updatedContainer = document.querySelector(containerSelector);
-          const newRows = updatedContainer.querySelectorAll(".cache-row");
-          const targetRow = newRows[newRows.length - 2];
-          if (targetRow) {
-            const selector = input.classList.contains("cache-key")
-              ? ".cache-key"
-              : ".cache-value";
-            const toFocus = targetRow.querySelector(selector);
-            if (toFocus) {
-              toFocus.focus();
-              const len = toFocus.value.length;
-              toFocus.setSelectionRange(len, len);
-            }
+      if (needsRerender) {
+        const wasKey = e.target.classList.contains("cache-key");
+        const renderFn = cacheType === "node" ? "renderOverlayData" : "renderGlobalCache";
+        this[renderFn]();
+
+        // Focus restoration after re-render
+        const containerSelector =
+          cacheType === "node" ? "#overlay-cache-entries" : "#global-cache-entries";
+        const updatedContainer = document.querySelector(containerSelector);
+        const newRows = updatedContainer.querySelectorAll(".cache-row");
+        const targetRow = newRows[newRows.length - 2];
+        if (targetRow) {
+          const toFocus = targetRow.querySelector(wasKey ? ".cache-key" : ".cache-value");
+          if (toFocus) {
+            toFocus.focus();
+            toFocus.setSelectionRange(toFocus.value.length, toFocus.value.length);
           }
         }
       }
     });
 
     // Click event delegation for delete buttons
-    newContainer.addEventListener("click", (e) => {
-      if (e.target.classList.contains("delete-cache-btn")) {
-        e.stopPropagation();
-        const cache =
-          cacheType === "node"
-            ? this.nodeCache.get(this.currentNode.id) || {}
-            : this.globalCache;
+    container.addEventListener("click", (e) => {
+      if (!e.target.classList.contains("delete-cache-btn")) return;
+      e.stopPropagation();
 
-        if (CacheEditorHelpers.handleDelete(e, cache)) {
-          if (cacheType === "node") {
-            this.nodeCache.set(this.currentNode.id, cache);
-            this.renderOverlayData();
-          } else {
-            this.renderGlobalCache();
-          }
+      const cache =
+        cacheType === "node"
+          ? this.nodeCache.get(this.currentNode.id) || {}
+          : this.globalCache;
+
+      if (CacheEditorHelpers.handleDelete(e, cache)) {
+        if (cacheType === "node") {
+          this.nodeCache.set(this.currentNode.id, cache);
+          this.renderOverlayData();
+        } else {
+          this.renderGlobalCache();
         }
       }
     });
   }
 
-  renderReadOnlyCache(cache) {
-    const entries = Object.entries(cache);
-    if (entries.length === 0) {
-      return '<div class="empty-cache" style="padding:4px; font-style:italic; opacity:0.6;">No data</div>';
-    }
-
-    // Ensure proper HTML table structure
-    let html = '<table class="cache-table"><tbody>';
-    entries.forEach(([key, value]) => {
-      html += `<tr>
-                <td class="cache-key">${this.escapeHtml(key)}</td>
-                <td class="cache-value">${this.escapeHtml(value)}</td>
-            </tr>`;
-    });
-    html += "</tbody></table>";
-    return html;
-  }
-
-  makeDraggable(element) {
-    const dragHandle = element.querySelector(".drag-handle") || element;
-
-    dragHandle.addEventListener("mousedown", (e) => {
-      // Use singleton drag manager state
-      DragManager.startDrag(element, e.clientX, e.clientY);
-      e.preventDefault();
-    });
-  }
-
   /**
-   * Make an element draggable from anywhere on its surface
-   * Used for panels that should be draggable except on interactive content
+   * Make an element draggable from anywhere on its surface.
+   * Used for panels that should be draggable except on interactive content.
    */
   makeDraggableFromAnywhere(element) {
     element.addEventListener("mousedown", (e) => {
@@ -2180,7 +2199,7 @@ class FlowPlay {
 
       const badge = document.createElement("span");
       badge.className = `history-list-badge ${node.type}`;
-      badge.textContent = this.formatNodeType(node.type).charAt(0);
+      badge.textContent = formatNodeType(node.type).charAt(0);
 
       item.appendChild(number);
       item.appendChild(label);
@@ -2218,8 +2237,10 @@ class FlowPlay {
 
   // Navigation helper methods
   goBack() {
-    if (this.historyIndex > 0) {
-      this.timeTravel(this.historyIndex - 1);
+    const prevNode = this.currentNode;
+    const node = FlowState.goBack();
+    if (node) {
+      this.goToNode(node, prevNode, false);
     }
   }
 
@@ -2228,41 +2249,11 @@ class FlowPlay {
    * @param {number} index - The history index to travel to
    */
   timeTravel(index) {
-    if (index < 0 || index >= this.history.length) return;
-    if (index === this.historyIndex) return;
-
-    const nodeId = this.history[index];
-    const node = this.nodes[nodeId];
-    if (!node) return;
-
-    // Update history index (don't modify history array)
-    this.historyIndex = index;
-
-    // Use shared navigation logic
-    this.goToNode(node, false);
-  }
-
-  closeOverlay() {
-    const overlay = document.getElementById("node-overlay");
-    overlay.classList.add("hidden");
-    // Restore the current node's collapsed shape
-    if (this.currentNode) {
-      d3.select(`#node-${this.currentNode.id} .node-collapsed`).style(
-        "opacity",
-        1
-      );
-      // Reset edge paths to use collapsed node dimensions
-      this.resetEdgesToCollapsedNode();
+    const prevNode = this.currentNode;
+    const node = FlowState.timeTravel(index);
+    if (node) {
+      this.goToNode(node, prevNode, false);
     }
-    this.fitToView();
-  }
-
-  /**
-   * Reset edge paths to use the collapsed node dimensions
-   */
-  resetEdgesToCollapsedNode() {
-    if (!this.currentNode) return;
-    this.resetEdgesForNode(this.currentNode.id);
   }
 
   /**
@@ -2377,7 +2368,7 @@ class FlowPlay {
     container.innerHTML = CacheEditorHelpers.generateRows(
       this.globalCache,
       "Add global key...",
-      this.escapeHtml.bind(this)
+      escapeHtml
     );
 
     // Use event delegation - same as node cache
@@ -2395,82 +2386,6 @@ class FlowPlay {
     const countBadge =
       count > 0 ? ` <span class="cache-count">(${count})</span>` : "";
     toggle.innerHTML = `Global Data${countBadge}`;
-  }
-
-  // =========================================
-  // STATE PERSISTENCE (localStorage)
-  // =========================================
-  saveState() {
-    if (!this.flowData) return;
-
-    const state = {
-      flowName: this.flowData.name,
-      currentNodeId: this.currentNode?.id,
-      history: this.history,
-      historyIndex: this.historyIndex,
-      visitedNodes: Array.from(this.visitedNodes),
-      globalCache: this.globalCache,
-      nodeCache: Object.fromEntries(this.nodeCache),
-    };
-
-    try {
-      localStorage.setItem(
-        `flowplay_${this.flowData.name}`,
-        JSON.stringify(state)
-      );
-    } catch (e) {
-      console.warn("Failed to save state to localStorage:", e);
-    }
-  }
-
-  loadState() {
-    if (!this.flowData) return false;
-
-    try {
-      const saved = localStorage.getItem(`flowplay_${this.flowData.name}`);
-      if (!saved) return false;
-
-      const state = JSON.parse(saved);
-      if (state.flowName !== this.flowData.name) return false;
-
-      this.history = state.history || [];
-      this.historyIndex = state.historyIndex ?? -1;
-      this.visitedNodes = new Set(state.visitedNodes || []);
-      this.globalCache = state.globalCache || {};
-      this.nodeCache = new Map(Object.entries(state.nodeCache || {}));
-
-      // Restore visited visual state
-      this.visitedNodes.forEach((nodeId) => {
-        d3.select(`#node-${nodeId}`).classed("visited", true);
-      });
-
-      // Navigate to saved current node
-      if (state.currentNodeId && this.nodes[state.currentNodeId]) {
-        this.currentNode = null; // Prevent adding to history
-        this.navigateToNodeDirect(state.currentNodeId);
-        return true;
-      }
-    } catch (e) {
-      console.warn("Failed to load state from localStorage:", e);
-    }
-    return false;
-  }
-
-  /**
-   * Navigate without adding to history (for state restoration)
-   */
-  navigateToNodeDirect(nodeId) {
-    const node = this.nodes[nodeId];
-    if (!node) return;
-
-    // Use shared navigation logic, but don't add to visited (state restoration)
-    this.goToNode(node, false);
-  }
-
-  clearSavedState() {
-    if (this.flowData) {
-      localStorage.removeItem(`flowplay_${this.flowData.name}`);
-    }
   }
 
   // =========================================
@@ -2505,25 +2420,6 @@ class FlowPlay {
   // =========================================
   // SETTINGS PANEL
   // =========================================
-  loadSettings() {
-    try {
-      const saved = localStorage.getItem("flowplay_settings");
-      if (saved) {
-        this.settings = { ...this.settings, ...JSON.parse(saved) };
-      }
-    } catch (e) {
-      console.warn("Failed to load settings:", e);
-    }
-  }
-
-  saveSettings() {
-    try {
-      localStorage.setItem("flowplay_settings", JSON.stringify(this.settings));
-    } catch (e) {
-      console.warn("Failed to save settings:", e);
-    }
-  }
-
   setupSettingsPanel() {
     const settingsBtn = document.getElementById("settings-btn");
     const settingsOverlay = document.getElementById("settings-overlay");
@@ -2567,7 +2463,7 @@ class FlowPlay {
         toggle.checked = this.settings[settingKey];
         toggle.addEventListener("change", () => {
           this.settings[settingKey] = toggle.checked;
-          this.saveSettings();
+          SettingsManager.save(this.settings);
           this.applySettings();
         });
       }
@@ -2581,7 +2477,7 @@ class FlowPlay {
         const value = parseFloat(zoomInput.value);
         if (!isNaN(value) && value >= 0.5 && value <= 3) {
           this.settings.defaultZoomLevel = value;
-          this.saveSettings();
+          SettingsManager.save(this.settings);
         }
       });
     }
@@ -2627,7 +2523,7 @@ class FlowPlay {
   setSetting(key, value) {
     if (this.settings.hasOwnProperty(key)) {
       this.settings[key] = value;
-      this.saveSettings();
+      SettingsManager.save(this.settings);
       this.applySettings();
     }
   }
