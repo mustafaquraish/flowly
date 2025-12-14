@@ -27,10 +27,10 @@
             <input
               type="text"
               id="node-search"
-              placeholder="Search nodes... (Ctrl+K)"
+              placeholder="Search nodes (⌘P / ⌘K)"
               autocomplete="off"
+              readonly
             />
-            <div id="search-results" class="hidden"></div>
           </div>
         </div>
         <div id="header-right">
@@ -54,7 +54,6 @@
           <div class="overlay-cache">
             <div class="section-header">
               <span>Cache</span>
-              <button id="overlay-add-cache" class="add-cache-btn">+</button>
             </div>
             <div class="cache-entries" id="overlay-cache-entries"></div>
           </div>
@@ -111,105 +110,6 @@
         </button>
       </div>
 
-      <!-- Settings Modal -->
-      <div id="settings-overlay" class="modal-overlay hidden">
-        <div id="settings-panel" class="settings-modal">
-          <div class="settings-header">
-            <span>Settings</span>
-            <button id="settings-close" class="modal-close-btn">&times;</button>
-          </div>
-          <div class="settings-content">
-            <div class="settings-section">
-              <div class="settings-section-title">Display</div>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="showMiniMap"
-                  checked
-                />
-                <span>Show Mini-map</span>
-              </label>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="showProgressIndicator"
-                  checked
-                />
-                <span>Show Progress Indicator</span>
-              </label>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="showNodePreview"
-                  checked
-                />
-                <span>Node Preview on Hover</span>
-              </label>
-            </div>
-            <div class="settings-section">
-              <div class="settings-section-title">Appearance</div>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="darkMode"
-                  checked
-                />
-                <span>Dark Mode</span>
-              </label>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="animatedEdges"
-                  checked
-                />
-                <span>Animated Edges</span>
-              </label>
-            </div>
-            <div class="settings-section">
-              <div class="settings-section-title">Behavior</div>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="autoHideControls"
-                  checked
-                />
-                <span>Auto-hide Controls</span>
-              </label>
-              <label class="setting-item">
-                <input
-                  type="checkbox"
-                  class="setting-toggle"
-                  data-setting="autoSaveState"
-                  checked
-                />
-                <span>Auto-save Progress</span>
-              </label>
-            </div>
-            <div class="settings-section">
-              <div class="settings-section-title">Zoom</div>
-              <div class="setting-item-row">
-                <span>Default Zoom Level</span>
-                <input
-                  type="number"
-                  id="default-zoom-input"
-                  class="setting-number-input"
-                  min="0.5"
-                  max="3"
-                  step="0.1"
-                  value="1.6"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- Mini-map -->
       <div id="mini-map" class="glass-panel">
         <canvas id="mini-map-canvas"></canvas>
@@ -220,13 +120,15 @@
       <div id="shortcuts-panel" class="glass-panel hidden">
         <div class="shortcuts-header">Keyboard Shortcuts</div>
         <div class="shortcuts-list">
-          <div class="shortcut"><kbd>Ctrl+K</kbd> Search nodes</div>
+          <div class="shortcut"><kbd>⌘⇧P</kbd> Command palette</div>
+          <div class="shortcut"><kbd>⌘P</kbd> Search nodes</div>
+          <div class="shortcut"><kbd>⌘K</kbd> Search nodes</div>
           <div class="shortcut"><kbd>1-9</kbd> Select edge / history item</div>
           <div class="shortcut"><kbd>↑↓</kbd> Navigate edges / history</div>
           <div class="shortcut"><kbd>Enter</kbd> Activate selected</div>
           <div class="shortcut"><kbd>B</kbd> Go back</div>
           <div class="shortcut"><kbd>Z</kbd> Zoom to current node</div>
-          <div class="shortcut"><kbd>Esc</kbd> Zoom out / close panel</div>
+          <div class="shortcut"><kbd>Esc</kbd> Close / zoom out</div>
           <div class="shortcut"><kbd>H</kbd> Toggle history panel</div>
           <div class="shortcut"><kbd>R</kbd> Restart</div>
           <div class="shortcut"><kbd>F</kbd> Fit all</div>

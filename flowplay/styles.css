@@ -351,6 +351,14 @@ body {
     border: 2px solid rgba(255, 255, 255, 0.15);
 }
 
+/* Glow for main overlay (current node in normal mode) */
+#node-overlay:not(.hidden) {
+    border-color: rgba(91, 95, 199, 0.8);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.6),
+        0 0 20px 5px rgba(91, 95, 199, 0.5);
+}
+
 .node-overlay.hidden {
     display: none !important;
 }
@@ -393,60 +401,6 @@ body {
     padding: 14px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     flex-shrink: 0;
-}
-
-.overlay-close-btn {
-    position: absolute;
-    top: 8px;
-    right: 10px;
-    width: 28px;
-    height: 28px;
-    border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-secondary);
-    border-radius: 50%;
-    font-size: 18px;
-    line-height: 1;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-}
-
-.overlay-close-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: var(--text-primary);
-}
-
-.overlay-back-btn {
-    position: absolute;
-    top: 8px;
-    left: 10px;
-    width: 28px;
-    height: 28px;
-    border: none;
-    background: rgba(255, 255, 255, 0.1);
-    color: var(--text-secondary);
-    border-radius: 50%;
-    font-size: 16px;
-    line-height: 1;
-    cursor: pointer;
-    transition: all var(--transition-fast);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 10;
-}
-
-.overlay-back-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: var(--text-primary);
-}
-
-.overlay-back-btn.hidden {
-    display: none;
 }
 
 .overlay-header h3 {
@@ -591,24 +545,6 @@ body {
     color: #5a5a66;
 }
 
-.add-cache-btn {
-    background: rgba(255, 255, 255, 0.1);
-    border: none;
-    color: #8a8a96;
-    width: 18px;
-    height: 18px;
-    border-radius: 3px;
-    cursor: pointer;
-    font-size: 12px;
-    line-height: 1;
-    transition: all 0.1s;
-}
-
-.add-cache-btn:hover {
-    background: rgba(255, 255, 255, 0.2);
-    color: #fff;
-}
-
 /* Overlay Actions */
 .overlay-actions {
     padding: 14px 16px;
@@ -699,172 +635,6 @@ body {
     color: var(--node-end);
 }
 
-#add-cache-entry {
-    width: 100%;
-    opacity: 0.7;
-}
-
-#add-cache-entry:hover {
-    opacity: 1;
-}
-
-/* Edge Options */
-.edge-options {
-    display: flex;
-    flex-direction: column;
-    gap: var(--spacing-xs);
-}
-
-/* Incoming Cache Panels */
-.incoming-cache-panel {
-    position: absolute;
-    width: 300px;
-    padding: 16px;
-    z-index: 150;
-    animation: fadeIn 0.15s ease;
-    user-select: text;
-    /* Allow text selection */
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    background: rgba(15, 15, 20, 0.98);
-    /* 98% opaque basically solid but slight tint */
-    backdrop-filter: blur(12px);
-    transition: box-shadow 0.2s;
-    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
-    border-radius: var(--radius-md);
-}
-
-/* Source Type-Based Tints - Opaque to match Overlay */
-.incoming-cache-panel.StartNode {
-    border: 1px solid rgba(45, 156, 111, 0.6);
-    background: linear-gradient(135deg, rgba(35, 75, 60, 0.98), rgba(25, 50, 42, 0.98));
-}
-
-.incoming-cache-panel.ProcessNode {
-    border: 1px solid rgba(74, 126, 184, 0.6);
-    background: linear-gradient(135deg, rgba(35, 50, 70, 0.98), rgba(28, 40, 55, 0.98));
-}
-
-.incoming-cache-panel.DecisionNode {
-    border: 1px solid rgba(196, 154, 60, 0.6);
-    background: linear-gradient(135deg, rgba(65, 55, 35, 0.98), rgba(50, 45, 28, 0.98));
-}
-
-.incoming-cache-panel.EndNode {
-    border: 1px solid rgba(199, 82, 91, 0.6);
-    background: linear-gradient(135deg, rgba(65, 35, 38, 0.98), rgba(50, 28, 30, 0.98));
-}
-
-.incoming-cache-panel .incoming-source {
-    font-size: 0.9rem;
-    font-weight: 600;
-    margin-bottom: 12px;
-    color: var(--text-primary);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    cursor: pointer;
-    padding: 8px 10px;
-    margin: -8px -10px 12px -10px;
-    border-radius: var(--radius-sm);
-    border-bottom: 1px solid rgba(255, 255, 255, 0.1);
-    transition: background var(--transition-fast);
-}
-
-.incoming-cache-panel .incoming-source:hover {
-    background: rgba(255, 255, 255, 0.05);
-}
-
-.incoming-cache-panel .incoming-source::after {
-    content: '→ Go to node';
-    margin-left: auto;
-    font-size: 0.7rem;
-    font-weight: 400;
-    color: var(--text-muted);
-    opacity: 0;
-    transition: opacity var(--transition-fast);
-}
-
-.incoming-cache-panel .incoming-source:hover::after {
-    opacity: 1;
-}
-
-.incoming-cache-panel .incoming-source .arrow {
-    color: var(--accent-primary);
-    font-size: 1.1em;
-    font-weight: 700;
-}
-
-/* Incoming Cache Table Styles */
-.incoming-cache-panel .cache-table {
-    width: 100%;
-    border-collapse: collapse;
-    font-size: 0.8rem;
-    table-layout: fixed;
-    /* Force wrap */
-}
-
-.incoming-cache-panel .cache-table tr {
-    border-bottom: 1px solid rgba(255, 255, 255, 0.05);
-}
-
-.incoming-cache-panel .cache-table tr:last-child {
-    border-bottom: none;
-}
-
-.incoming-cache-panel .cache-table td {
-    padding: 6px 4px;
-    vertical-align: top;
-    word-break: break-word;
-}
-
-.incoming-cache-panel .cache-key {
-    width: 35%;
-    color: var(--text-muted);
-    font-weight: 500;
-    padding-right: 8px;
-}
-
-.incoming-cache-panel .cache-value {
-    color: var(--text-primary);
-    font-family: var(--font-mono);
-    white-space: pre-wrap;
-    /* Respect newlines */
-    background: rgba(0, 0, 0, 0.2);
-    border-radius: 3px;
-    padding: 4px;
-}
-
-.incoming-cache-panel.dragging {
-    opacity: 0.95;
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.7);
-    cursor: grabbing;
-}
-
-/* Drag Handle */
-.drag-handle {
-    position: absolute;
-    top: 8px;
-    right: 10px;
-    color: var(--text-muted);
-    cursor: grab;
-    padding: 4px 6px;
-    font-size: 0.9rem;
-    opacity: 0.3;
-    transition: opacity var(--transition-fast);
-    letter-spacing: -2px;
-    background: rgba(255, 255, 255, 0.05);
-    border-radius: 4px;
-}
-
-.incoming-cache-panel:hover .drag-handle {
-    opacity: 0.7;
-}
-
-.drag-handle:hover {
-    opacity: 1 !important;
-    background: rgba(255, 255, 255, 0.1);
-}
-
 /* Fix links in markdown */
 @keyframes fadeIn {
     from {
@@ -874,60 +644,6 @@ body {
     to {
         opacity: 1;
     }
-}
-
-.incoming-source {
-    display: flex;
-    align-items: center;
-    gap: var(--spacing-xs);
-    margin-bottom: var(--spacing-sm);
-    cursor: pointer;
-    padding: 2px 4px;
-    border-radius: 3px;
-    transition: background var(--transition-fast);
-}
-
-.incoming-source:hover {
-    background: var(--bg-tertiary);
-}
-
-.incoming-source .arrow {
-    color: var(--accent-secondary);
-    font-size: 0.7rem;
-}
-
-.incoming-source .source-label {
-    color: var(--text-primary);
-    font-size: 0.7rem;
-    font-weight: 500;
-}
-
-.incoming-cache-panel .cache-table {
-    font-size: 0.65rem;
-}
-
-.incoming-cache-panel .cache-table td {
-    padding: 1px 2px;
-    color: var(--text-secondary);
-}
-
-.incoming-cache-panel .cache-key {
-    color: var(--text-muted);
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-}
-
-.incoming-cache-panel .cache-value {
-    font-family: var(--font-mono);
-    font-size: 0.6rem;
-    color: var(--text-primary);
-    word-break: break-all;
-}
-
-.empty-cache {
-    color: var(--text-muted);
-    font-size: 0.65rem;
-    font-style: italic;
 }
 
 /* History Toggle Button */
@@ -1485,6 +1201,11 @@ body {
     color: var(--text-primary);
     font-size: 12px;
     outline: none;
+    cursor: pointer;
+}
+
+#node-search:hover {
+    background: rgba(255, 255, 255, 0.05);
 }
 
 #node-search::placeholder {
@@ -1984,6 +1705,23 @@ body.light-mode .glass-panel {
 body.light-mode .node-overlay {
     background: rgba(255, 255, 255, 0.98);
     border: 2px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.15);
+}
+
+/* Glow for main overlay in light mode */
+body.light-mode #node-overlay:not(.hidden) {
+    border-color: rgba(91, 95, 199, 0.6);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.15),
+        0 0 20px 5px rgba(91, 95, 199, 0.35);
+}
+
+/* Glow for current expanded overlay in light mode */
+body.light-mode .expanded-node-overlay.current {
+    border-color: rgba(91, 95, 199, 0.6);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.15),
+        0 0 20px 5px rgba(91, 95, 199, 0.35);
 }
 
 body.light-mode .node-overlay.StartNode {
@@ -2010,22 +1748,14 @@ body.light-mode .overlay-header h3 {
     color: #1d1d1f;
 }
 
-body.light-mode .overlay-close-btn,
-body.light-mode .overlay-back-btn,
 body.light-mode .modal-close-btn {
     background: rgba(0, 0, 0, 0.06);
     color: #6e6e73;
 }
 
-body.light-mode .overlay-close-btn:hover,
-body.light-mode .overlay-back-btn:hover,
 body.light-mode .modal-close-btn:hover {
     background: rgba(0, 0, 0, 0.12);
     color: #1d1d1f;
-}
-
-body.light-mode .history-dropdown {
-    background: #ffffff;
 }
 
 body.light-mode .settings-modal {
@@ -2125,4 +1855,257 @@ body.no-edge-animation .edge-path {
 
 body.no-edge-animation .edge-path[style*="stroke-dasharray"] {
     stroke-dasharray: none !important;
+}
+
+/* ============================================
+   COMMAND PALETTE
+   ============================================ */
+
+.command-palette {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    z-index: 600;
+    display: flex;
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 15vh;
+}
+
+.command-palette.hidden {
+    display: none;
+}
+
+.command-palette-backdrop {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.5);
+    backdrop-filter: blur(4px);
+    animation: fadeIn 0.15s ease;
+}
+
+.command-palette-modal {
+    position: relative;
+    width: 560px;
+    max-width: 90%;
+    background: var(--bg-secondary);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-lg);
+    box-shadow: 0 25px 80px rgba(0, 0, 0, 0.6);
+    overflow: hidden;
+    animation: slideDown 0.15s ease;
+}
+
+@keyframes slideDown {
+    from { 
+        opacity: 0;
+        transform: translateY(-20px) scale(0.98);
+    }
+    to { 
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.command-palette-input-wrapper {
+    display: flex;
+    align-items: center;
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--glass-border);
+    background: var(--bg-tertiary);
+}
+
+.command-palette-icon {
+    font-size: 16px;
+    margin-right: 12px;
+    opacity: 0.5;
+}
+
+.command-palette-input {
+    flex: 1;
+    background: none;
+    border: none;
+    color: var(--text-primary);
+    font-size: 15px;
+    font-family: var(--font-family);
+    outline: none;
+}
+
+.command-palette-input::placeholder {
+    color: var(--text-muted);
+}
+
+.command-palette-results {
+    max-height: 400px;
+    overflow-y: auto;
+    padding: 6px 0;
+}
+
+.command-item {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    cursor: pointer;
+    transition: background var(--transition-fast);
+}
+
+.command-item:hover,
+.command-item.hover {
+    background: rgba(255, 255, 255, 0.06);
+}
+
+.command-item.selected {
+    background: rgba(91, 95, 199, 0.15);
+}
+
+/* Quick number indicator - hidden by default, shown when command key is held */
+.quick-number {
+    display: none;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: var(--accent-primary);
+    color: white;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    margin-right: 10px;
+    flex-shrink: 0;
+}
+
+/* Show quick numbers when command key is held */
+.command-palette.show-quick-numbers .quick-number {
+    display: inline-flex;
+}
+
+/* Command shortcut display */
+.command-shortcut {
+    display: inline-block;
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--glass-border);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--text-muted);
+    margin-left: 8px;
+    flex-shrink: 0;
+}
+
+.command-icon {
+    width: 24px;
+    font-size: 14px;
+    color: var(--text-muted);
+    flex-shrink: 0;
+}
+
+.command-label {
+    flex: 1;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.command-category {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: 12px;
+}
+
+.command-empty {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 13px;
+}
+
+/* Node items in palette */
+.node-type-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    margin-right: 12px;
+    flex-shrink: 0;
+}
+
+.node-type-dot.start { background: var(--node-start); }
+.node-type-dot.end { background: var(--node-end); }
+.node-type-dot.process { background: var(--node-process); }
+.node-type-dot.decision { background: var(--node-decision); }
+
+/* Light mode for command palette */
+body.light-mode .command-palette-modal {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.1);
+}
+
+body.light-mode .command-palette-input-wrapper {
+    background: #f5f5f5;
+    border-color: rgba(0, 0, 0, 0.08);
+}
+
+body.light-mode .command-item.selected {
+    background: rgba(91, 95, 199, 0.1);
+}
+
+body.light-mode .command-item:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+/* ============================================
+   ALWAYS EXPAND NODES MODE
+   ============================================ */
+
+/* Expanded overlays - positioning only (inherits all styling from .node-overlay) */
+.expanded-node-overlay {
+    position: absolute;
+    z-index: 50;
+}
+
+.expanded-node-overlay.current {
+    z-index: 60;
+    border-color: rgba(91, 95, 199, 0.8);
+    box-shadow: 
+        0 8px 32px rgba(0, 0, 0, 0.6),
+        0 0 20px 5px rgba(91, 95, 199, 0.5);
+}
+
+.expanded-node-overlay.visited {
+    opacity: 0.9;
+}
+
+.expanded-node-overlay.visited:hover {
+    opacity: 1;
+}
+
+/* Click blocker for non-current expanded overlays */
+.overlay-click-blocker {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 100;
+    cursor: pointer;
+    background: transparent;
+}
+
+/* Hide click blocker on current node to allow interactions */
+.expanded-node-overlay.current .overlay-click-blocker {
+    display: none;
+}
+
+/* Hide main overlay when in always-expand mode */
+body.always-expand-nodes #node-overlay {
+    display: none !important;
+}
+
+/* Hide collapsed nodes when in always-expand mode */
+body.always-expand-nodes .node-collapsed {
+    opacity: 0 !important;
 }

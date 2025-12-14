@@ -48,8 +48,12 @@ const DragManager = {
   init() {
     document.addEventListener("mousemove", (e) => {
       if (!this.activeElement) return;
-      this.activeElement.style.left = `${this.initialLeft + e.clientX - this.startX}px`;
-      this.activeElement.style.top = `${this.initialTop + e.clientY - this.startY}px`;
+      this.activeElement.style.left = `${
+        this.initialLeft + e.clientX - this.startX
+      }px`;
+      this.activeElement.style.top = `${
+        this.initialTop + e.clientY - this.startY
+      }px`;
     });
 
     document.addEventListener("mouseup", () => {
@@ -85,6 +89,7 @@ const SettingsManager = {
     animatedEdges: true,
     autoHideControls: true,
     autoSaveState: true,
+    alwaysExpandNodes: false,
     defaultZoomLevel: 1.6,
   },
 
@@ -122,6 +127,580 @@ const SettingsManager = {
 };
 
 // =========================================
+// COMMAND PALETTE
+// =========================================
+
+const CommandPalette = {
+  element: null,
+  inputElement: null,
+  resultsElement: null,
+  isOpen: false,
+  mode: "commands", // 'commands' or 'nodes'
+  keyboardIndex: 0, // Keyboard focus index (separate from hover)
+  hoverIndex: -1,   // Hover focus index (-1 means no hover)
+  isCommandKeyHeld: false, // Track if command/ctrl key is held
+  results: [],
+  app: null, // Reference to FlowPlay instance
+
+  // Command definitions with shortcuts
+  commands: [
+    // Settings toggles
+    {
+      id: "toggle-minimap",
+      label: "Toggle Mini-map",
+      category: "Display",
+      settingKey: "showMiniMap",
+    },
+    {
+      id: "toggle-progress",
+      label: "Toggle Progress Indicator",
+      category: "Display",
+      settingKey: "showProgressIndicator",
+    },
+    {
+      id: "toggle-preview",
+      label: "Toggle Node Preview on Hover",
+      category: "Display",
+      settingKey: "showNodePreview",
+    },
+    {
+      id: "toggle-dark-mode",
+      label: "Toggle Dark Mode",
+      category: "Appearance",
+      settingKey: "darkMode",
+    },
+    {
+      id: "toggle-animated-edges",
+      label: "Toggle Animated Edges",
+      category: "Appearance",
+      settingKey: "animatedEdges",
+    },
+    {
+      id: "toggle-auto-hide",
+      label: "Toggle Auto-hide Controls",
+      category: "Behavior",
+      settingKey: "autoHideControls",
+    },
+    {
+      id: "toggle-auto-save",
+      label: "Toggle Auto-save Progress",
+      category: "Behavior",
+      settingKey: "autoSaveState",
+    },
+    {
+      id: "toggle-expand-nodes",
+      label: "Toggle Always Expand Nodes",
+      category: "Display",
+      settingKey: "alwaysExpandNodes",
+    },
+    // Actions with shortcuts
+    {
+      id: "restart",
+      label: "Restart Flow",
+      category: "Navigation",
+      action: "restart",
+      shortcut: "R",
+    },
+    { id: "zoom-in", label: "Zoom In", category: "View", action: "zoomIn", shortcut: "+" },
+    { id: "zoom-out", label: "Zoom Out", category: "View", action: "zoomOut", shortcut: "-" },
+    {
+      id: "fit-view",
+      label: "Fit All Nodes in View",
+      category: "View",
+      action: "fitView",
+      shortcut: "F",
+    },
+    {
+      id: "zoom-to-node",
+      label: "Zoom to Current Node",
+      category: "View",
+      action: "zoomToCurrentNode",
+      shortcut: "Z",
+    },
+    {
+      id: "go-back",
+      label: "Go Back in History",
+      category: "Navigation",
+      action: "goBack",
+      shortcut: "B",
+    },
+    {
+      id: "toggle-history",
+      label: "Toggle History Panel",
+      category: "Panels",
+      action: "toggleHistoryPanel",
+      shortcut: "H",
+    },
+    {
+      id: "export-state",
+      label: "Export Session State",
+      category: "Data",
+      action: "exportState",
+    },
+    {
+      id: "search-nodes",
+      label: "Search Nodes...",
+      category: "Navigation",
+      action: "openNodeSearch",
+      shortcut: "⌘P",
+    },
+  ],
+
+  init(app) {
+    this.app = app;
+    this.createDOM();
+    this.setupKeyboardShortcuts();
+    this.setupCommandKeyTracking();
+  },
+
+  setupCommandKeyTracking() {
+    // Track when command/ctrl key is held for quick number selection
+    // Use a CSS class on the modal to show/hide numbers without re-rendering
+    document.addEventListener("keydown", (e) => {
+      if ((e.metaKey || e.ctrlKey) && this.isOpen) {
+        // Only show numbers if the key is pressed AFTER the palette is open
+        // (not during the Cmd+P that opened it)
+        if (!this.isCommandKeyHeld && this.hasReleasedCommandKey) {
+          this.isCommandKeyHeld = true;
+          this.element.classList.add("show-quick-numbers");
+        }
+        // Handle command+number quick selection
+        const num = parseInt(e.key);
+        if (num >= 1 && num <= 9 && this.hasReleasedCommandKey) {
+          e.preventDefault();
+          const index = num - 1;
+          if (index < this.results.length) {
+            this.keyboardIndex = index;
+            this.executeSelected();
+          }
+        }
+      }
+    });
+
+    document.addEventListener("keyup", (e) => {
+      // Track when command key is released after opening
+      if (!e.metaKey && !e.ctrlKey) {
+        if (this.isOpen && !this.hasReleasedCommandKey) {
+          // First release after opening - now allow quick numbers
+          this.hasReleasedCommandKey = true;
+        }
+        if (this.isCommandKeyHeld) {
+          this.isCommandKeyHeld = false;
+          this.element.classList.remove("show-quick-numbers");
+        }
+      }
+    });
+  },
+
+  createDOM() {
+    // Create palette container
+    this.element = document.createElement("div");
+    this.element.id = "command-palette";
+    this.element.className = "command-palette hidden";
+    this.element.innerHTML = `
+      <div class="command-palette-backdrop"></div>
+      <div class="command-palette-modal">
+        <div class="command-palette-input-wrapper">
+          <span class="command-palette-icon">⌘</span>
+          <input type="text" class="command-palette-input" placeholder="Type a command..." autocomplete="off" />
+        </div>
+        <div class="command-palette-results"></div>
+      </div>
+    `;
+    document.body.appendChild(this.element);
+
+    this.inputElement = this.element.querySelector(".command-palette-input");
+    this.resultsElement = this.element.querySelector(
+      ".command-palette-results"
+    );
+
+    // Event listeners
+    this.element
+      .querySelector(".command-palette-backdrop")
+      .addEventListener("click", () => this.close());
+
+    this.inputElement.addEventListener("input", () => this.onInput());
+    this.inputElement.addEventListener("keydown", (e) => this.onKeyDown(e));
+  },
+
+  setupKeyboardShortcuts() {
+    document.addEventListener("keydown", (e) => {
+      // Cmd+Shift+P or Ctrl+Shift+P for command palette
+      if (
+        (e.metaKey || e.ctrlKey) &&
+        e.shiftKey &&
+        e.key.toLowerCase() === "p"
+      ) {
+        e.preventDefault();
+        this.open("commands");
+      }
+      // Cmd+P or Ctrl+P for node search (also keep Cmd+K)
+      else if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "p"
+      ) {
+        e.preventDefault();
+        this.open("nodes");
+      }
+      // Escape to close
+      else if (e.key === "Escape" && this.isOpen) {
+        e.preventDefault();
+        this.close();
+      }
+    });
+  },
+
+  open(mode = "commands") {
+    this.mode = mode;
+    this.isOpen = true;
+    this.keyboardIndex = 0;
+    this.hoverIndex = -1;
+    this.isCommandKeyHeld = false;
+    this.hasReleasedCommandKey = false; // Don't allow quick numbers until Cmd is released once
+    this.element.classList.remove("hidden");
+    this.element.classList.remove("show-quick-numbers");
+    this.inputElement.value = "";
+    this.inputElement.placeholder =
+      mode === "commands"
+        ? "Type a command..."
+        : "Search nodes by name or ID...";
+    this.element.querySelector(".command-palette-icon").textContent =
+      mode === "commands" ? "⌘" : "🔍";
+    this.inputElement.focus();
+    this.updateResults();
+  },
+
+  close() {
+    this.isOpen = false;
+    this.isCommandKeyHeld = false;
+    this.hasReleasedCommandKey = false;
+    this.element.classList.add("hidden");
+    this.element.classList.remove("show-quick-numbers");
+    this.inputElement.value = "";
+    this.results = [];
+  },
+
+  onInput() {
+    this.keyboardIndex = 0;
+    this.hoverIndex = -1;
+    this.updateResults();
+  },
+
+  onKeyDown(e) {
+    switch (e.key) {
+      case "ArrowDown":
+        e.preventDefault();
+        this.keyboardIndex = Math.min(
+          this.keyboardIndex + 1,
+          this.results.length - 1
+        );
+        this.hoverIndex = -1; // Clear hover on keyboard nav
+        this.updateSelectionClasses();
+        this.scrollSelectedIntoView();
+        break;
+      case "ArrowUp":
+        e.preventDefault();
+        this.keyboardIndex = Math.max(this.keyboardIndex - 1, 0);
+        this.hoverIndex = -1; // Clear hover on keyboard nav
+        this.updateSelectionClasses();
+        this.scrollSelectedIntoView();
+        break;
+      case "Enter":
+        e.preventDefault();
+        this.executeSelected();
+        break;
+      case "Escape":
+        e.preventDefault();
+        this.close();
+        break;
+    }
+  },
+
+  scrollSelectedIntoView() {
+    const selected = this.resultsElement.querySelector(
+      ".command-item.selected"
+    );
+    if (selected) {
+      selected.scrollIntoView({ block: "nearest" });
+    }
+  },
+
+  updateResults() {
+    const query = this.inputElement.value.toLowerCase().trim();
+
+    if (this.mode === "commands") {
+      this.results = this.filterCommands(query);
+    } else {
+      this.results = this.filterNodes(query);
+    }
+
+    this.renderResults();
+  },
+
+  filterCommands(query) {
+    if (!query) {
+      return this.commands.map((cmd) => ({ ...cmd, type: "command" }));
+    }
+
+    // Fuzzy match
+    return this.commands
+      .map((cmd) => {
+        const searchText = `${cmd.label} ${cmd.category}`.toLowerCase();
+        const score = this.fuzzyScore(query, searchText);
+        return { ...cmd, type: "command", score };
+      })
+      .filter((cmd) => cmd.score > 0)
+      .sort((a, b) => b.score - a.score);
+  },
+
+  filterNodes(query) {
+    const nodes = Object.values(FlowState.nodes);
+
+    if (!query) {
+      // Show recent/current nodes first, then all nodes
+      const currentId = FlowState.currentNode?.id;
+      const historyIds = new Set(FlowState.history.slice(-5));
+
+      return nodes
+        .map((node) => ({
+          ...node,
+          type: "node",
+          nodeType: node.type, // Preserve original node type for coloring
+          score: node.id === currentId ? 100 : historyIds.has(node.id) ? 50 : 0,
+        }))
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 20);
+    }
+
+    return nodes
+      .map((node) => {
+        const searchText = `${node.label} ${node.id} ${
+          node.metadata?.description || ""
+        }`.toLowerCase();
+        const score = this.fuzzyScore(query, searchText);
+        return { ...node, type: "node", nodeType: node.type, score };
+      })
+      .filter((node) => node.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 20);
+  },
+
+  fuzzyScore(query, text) {
+    // Simple fuzzy matching - consecutive character matching with bonuses
+    let score = 0;
+    let queryIdx = 0;
+    let consecutive = 0;
+
+    for (let i = 0; i < text.length && queryIdx < query.length; i++) {
+      if (text[i] === query[queryIdx]) {
+        score += 1 + consecutive;
+        consecutive++;
+        queryIdx++;
+      } else {
+        consecutive = 0;
+      }
+    }
+
+    // Must match all query characters
+    if (queryIdx < query.length) return 0;
+
+    // Bonus for matching at word boundaries
+    if (text.startsWith(query)) score += 10;
+    if (text.includes(" " + query)) score += 5;
+
+    return score;
+  },
+
+  /**
+   * Extract first sentence from a markdown description
+   */
+  getFirstSentence(markdown) {
+    if (!markdown) return "";
+    // Strip markdown formatting and get first sentence
+    const plain = markdown
+      .replace(/[#*_`~\[\]]/g, "")
+      .replace(/\n+/g, " ")
+      .trim();
+    // Find first sentence-ending punctuation
+    const match = plain.match(/^[^.!?]*[.!?]/);
+    if (match) {
+      const sentence = match[0].trim();
+      return sentence.length > 80 ? sentence.substring(0, 77) + "..." : sentence;
+    }
+    // No sentence end found, truncate
+    return plain.length > 80 ? plain.substring(0, 77) + "..." : plain;
+  },
+
+  /**
+   * Get the effective selected index (keyboard takes precedence over hover)
+   */
+  getEffectiveIndex() {
+    return this.hoverIndex >= 0 ? this.hoverIndex : this.keyboardIndex;
+  },
+
+  renderResults() {
+    if (this.results.length === 0) {
+      this.resultsElement.innerHTML = `
+        <div class="command-empty">
+          ${this.mode === "commands" ? "No commands found" : "No nodes found"}
+        </div>
+      `;
+      return;
+    }
+
+    this.resultsElement.innerHTML = this.results
+      .map((item, idx) => {
+        const isKeyboardSelected = idx === this.keyboardIndex;
+        const isHoverSelected = idx === this.hoverIndex;
+        const selectedClass = isKeyboardSelected ? "selected" : (isHoverSelected ? "hover" : "");
+        // Always include quick number span for items 1-9 (hidden by CSS, shown when Cmd held)
+        const quickNumber = idx < 9 ? `<span class="quick-number">${idx + 1}</span>` : "";
+
+        if (item.type === "command") {
+          const icon = item.settingKey
+            ? this.app.settings[item.settingKey]
+              ? "✓"
+              : "○"
+            : "›";
+          // Show shortcut if available
+          const shortcutHtml = item.shortcut ? `<span class="command-shortcut">${escapeHtml(item.shortcut)}</span>` : "";
+          return `
+            <div class="command-item ${selectedClass}" data-index="${idx}">
+              ${quickNumber}
+              <span class="command-icon">${icon}</span>
+              <span class="command-label">${escapeHtml(item.label)}</span>
+              <span class="command-category">${escapeHtml(item.category)}</span>
+              ${shortcutHtml}
+            </div>
+          `;
+        } else {
+          // Node item - get color based on node type
+          const nodeType = item.nodeType || item.type;
+          const nodeTypeClass =
+            nodeType === "StartNode"
+              ? "start"
+              : nodeType === "EndNode"
+              ? "end"
+              : nodeType === "DecisionNode"
+              ? "decision"
+              : "process";
+          const isCurrent = item.id === FlowState.currentNode?.id;
+          // Show first sentence of description instead of raw ID
+          const description = this.getFirstSentence(item.metadata?.description);
+          const secondaryText = description || item.id;
+          return `
+            <div class="command-item node-item ${selectedClass}" data-index="${idx}">
+              ${quickNumber}
+              <span class="node-type-dot ${nodeTypeClass}"></span>
+              <span class="command-label">${escapeHtml(item.label)}${isCurrent ? " <em>(current)</em>" : ""}</span>
+              <span class="command-category">${escapeHtml(secondaryText)}</span>
+            </div>
+          `;
+        }
+      })
+      .join("");
+
+    // Attach event listeners
+    this.attachResultListeners();
+  },
+
+  /**
+   * Attach click/hover listeners to result items
+   * Separated to allow updating visual state without full re-render
+   */
+  attachResultListeners() {
+    this.resultsElement.querySelectorAll(".command-item").forEach((el) => {
+      const idx = parseInt(el.dataset.index, 10);
+      
+      // Click to execute
+      el.addEventListener("click", (e) => {
+        e.preventDefault();
+        e.stopPropagation();
+        this.keyboardIndex = idx;
+        this.executeSelected();
+      });
+      
+      // Mouseenter/leave only update visual state, don't re-render
+      el.addEventListener("mouseenter", () => {
+        // Just update visual classes, don't call renderResults
+        this.resultsElement.querySelectorAll(".command-item").forEach((item, i) => {
+          item.classList.toggle("hover", i === idx);
+        });
+        this.hoverIndex = idx;
+      });
+      
+      el.addEventListener("mouseleave", () => {
+        el.classList.remove("hover");
+        this.hoverIndex = -1;
+      });
+    });
+  },
+
+  /**
+   * Update just the selection classes without full re-render
+   */
+  updateSelectionClasses() {
+    this.resultsElement.querySelectorAll(".command-item").forEach((el, idx) => {
+      el.classList.toggle("selected", idx === this.keyboardIndex);
+      el.classList.toggle("hover", idx === this.hoverIndex);
+    });
+  },
+
+  executeSelected() {
+    // Use keyboard index for execution (not hover)
+    const item = this.results[this.keyboardIndex];
+    if (!item) return;
+
+    this.close();
+
+    if (item.type === "command") {
+      if (item.settingKey) {
+        // Toggle setting
+        const newValue = !this.app.settings[item.settingKey];
+        this.app.settings[item.settingKey] = newValue;
+        SettingsManager.save(this.app.settings);
+        this.app.applySettings();
+      } else if (item.action) {
+        // Execute action
+        switch (item.action) {
+          case "restart":
+            this.app.restart();
+            break;
+          case "zoomIn":
+            this.app.zoomIn();
+            break;
+          case "zoomOut":
+            this.app.zoomOut();
+            break;
+          case "fitView":
+            this.app.fitToView();
+            break;
+          case "zoomToCurrentNode":
+            if (this.app.currentNode) this.app.zoomToNode(this.app.currentNode);
+            break;
+          case "goBack":
+            this.app.goBack();
+            break;
+          case "toggleHistoryPanel":
+            this.app.toggleHistoryPanel();
+            break;
+          case "exportState":
+            this.app.exportState();
+            break;
+          case "openNodeSearch":
+            setTimeout(() => this.open("nodes"), 50);
+            break;
+        }
+      }
+    } else {
+      // Navigate to node
+      this.app.navigateToNode(item.id);
+    }
+  },
+};
+
+// =========================================
 // FLOW STATE MANAGER
 // =========================================
 
@@ -152,7 +731,7 @@ const FlowState = {
     this.flowData = flowData;
     this.nodes = {};
     this.edges = {};
-    
+
     flowData.nodes.forEach((node) => {
       this.nodes[node.id] = node;
     });
@@ -182,8 +761,10 @@ const FlowState = {
     if (!node) return null;
 
     // Update history
-    if (this.historyIndex < this.history.length - 1 &&
-        this.history[this.historyIndex + 1] === nodeId) {
+    if (
+      this.historyIndex < this.history.length - 1 &&
+      this.history[this.historyIndex + 1] === nodeId
+    ) {
       this.historyIndex++;
     } else {
       this.history = this.history.slice(0, this.historyIndex + 1);
@@ -204,7 +785,11 @@ const FlowState = {
    * Time travel to a specific history index
    */
   timeTravel(index) {
-    if (index < 0 || index >= this.history.length || index === this.historyIndex) {
+    if (
+      index < 0 ||
+      index >= this.history.length ||
+      index === this.historyIndex
+    ) {
       return null;
     }
     this.historyIndex = index;
@@ -216,7 +801,9 @@ const FlowState = {
    * Go back in history
    */
   goBack() {
-    return this.historyIndex > 0 ? this.timeTravel(this.historyIndex - 1) : null;
+    return this.historyIndex > 0
+      ? this.timeTravel(this.historyIndex - 1)
+      : null;
   },
 
   /**
@@ -241,7 +828,10 @@ const FlowState = {
       nodeCache: Object.fromEntries(this.nodeCache),
     };
     try {
-      localStorage.setItem(`flowplay_${this.flowData.name}`, JSON.stringify(state));
+      localStorage.setItem(
+        `flowplay_${this.flowData.name}`,
+        JSON.stringify(state)
+      );
     } catch (e) {
       console.warn("Failed to save state:", e);
     }
@@ -410,8 +1000,6 @@ class FlowPlay {
     this.zoom = null;
 
     // UI state
-    this.searchResults = [];
-    this.searchSelectedIndex = -1;
     this.selectedHistoryIndex = -1;
     this.selectedEdgeIndex = 0;
     this.nodePreviewTooltip = null;
@@ -427,18 +1015,42 @@ class FlowPlay {
   }
 
   // Convenience accessors for FlowState
-  get flowData() { return FlowState.flowData; }
-  get nodes() { return FlowState.nodes; }
-  get edges() { return FlowState.edges; }
-  get graph() { return FlowState.graph; }
-  get currentNode() { return FlowState.currentNode; }
-  get history() { return FlowState.history; }
-  get historyIndex() { return FlowState.historyIndex; }
-  get visitedNodes() { return FlowState.visitedNodes; }
-  get nodeCache() { return FlowState.nodeCache; }
-  get globalCache() { return FlowState.globalCache; }
-  get userZoomLevel() { return FlowState.userZoomLevel; }
-  set userZoomLevel(value) { FlowState.userZoomLevel = value; }
+  get flowData() {
+    return FlowState.flowData;
+  }
+  get nodes() {
+    return FlowState.nodes;
+  }
+  get edges() {
+    return FlowState.edges;
+  }
+  get graph() {
+    return FlowState.graph;
+  }
+  get currentNode() {
+    return FlowState.currentNode;
+  }
+  get history() {
+    return FlowState.history;
+  }
+  get historyIndex() {
+    return FlowState.historyIndex;
+  }
+  get visitedNodes() {
+    return FlowState.visitedNodes;
+  }
+  get nodeCache() {
+    return FlowState.nodeCache;
+  }
+  get globalCache() {
+    return FlowState.globalCache;
+  }
+  get userZoomLevel() {
+    return FlowState.userZoomLevel;
+  }
+  set userZoomLevel(value) {
+    FlowState.userZoomLevel = value;
+  }
 
   async init() {
     try {
@@ -452,6 +1064,7 @@ class FlowPlay {
       this.setupNodePreview();
       this.setupAutoHide();
       this.setupSettingsPanel();
+      CommandPalette.init(this);
       this.applySettings();
       this.start();
       this.showLoading(false);
@@ -484,7 +1097,7 @@ class FlowPlay {
   async loadFlowData() {
     let flowData = null;
     let errorMessage = "Failed to load flowchart";
-    
+
     try {
       const response = await fetch("./complex_flow.json");
       if (response.ok) {
@@ -496,7 +1109,8 @@ class FlowPlay {
 
     // Try bundled data as fallback
     if (!flowData) {
-      flowData = typeof bundledFlowData !== "undefined" ? bundledFlowData : null;
+      flowData =
+        typeof bundledFlowData !== "undefined" ? bundledFlowData : null;
       if (flowData) {
         console.log("Using bundled json data!");
       } else {
@@ -576,6 +1190,8 @@ class FlowPlay {
     this.g.attr("transform", event.transform);
     // Reposition overlay when zooming/panning
     this.positionOverlay();
+    // Reposition expanded overlays if enabled
+    this.positionExpandedOverlays();
     // Update minimap viewport
     this.updateMiniMapViewport();
     // Update zoom level indicator
@@ -728,9 +1344,10 @@ class FlowPlay {
           this.hideNodePreview();
         })
         .on("dblclick", () => {
-          // Double-click to re-zoom if current node, or navigate
+          // Double-click to reset zoom to default level and re-center
           if (this.currentNode && node.id === this.currentNode.id) {
-            // Always re-zoom on double-click of current node
+            // Reset user zoom level to default on double-click of current node
+            this.userZoomLevel = null;
             this.zoomToNode(node);
           } else {
             this.navigateToNode(node.id);
@@ -797,6 +1414,221 @@ class FlowPlay {
     this.fitToView();
   }
 
+  // =========================================
+  // EXPANDED OVERLAYS (Always Expand Mode)
+  // =========================================
+
+  /**
+   * Create or update expanded overlays for all nodes
+   * Called when alwaysExpandNodes setting changes
+   */
+  setupExpandedOverlays() {
+    const container = document.getElementById("flowchart-container");
+
+    // Remove existing expanded overlays
+    container
+      .querySelectorAll(".expanded-node-overlay")
+      .forEach((el) => el.remove());
+
+    if (!this.settings.alwaysExpandNodes) {
+      // Restore collapsed node visibility (except current node which shows main overlay)
+      Object.values(this.nodes).forEach((node) => {
+        const isCurrentNode =
+          this.currentNode && node.id === this.currentNode.id;
+        d3.select(`#node-${node.id} .node-collapsed`).style(
+          "opacity",
+          isCurrentNode ? 0 : 1
+        );
+      });
+      // Reset all edges to collapsed node dimensions, then update for current node
+      this.resetAllEdgesToCollapsed();
+      // If there's a current node, update its edges for the main overlay
+      if (this.currentNode) {
+        const overlay = document.getElementById("node-overlay");
+        if (overlay && !overlay.classList.contains("hidden")) {
+          this.updateEdgesForExpandedNode(overlay);
+        }
+      }
+      return;
+    }
+
+    // Hide all collapsed nodes
+    this.g.selectAll(".node-collapsed").style("opacity", 0);
+
+    // Create an overlay for each node - using EXACT same structure as main overlay
+    Object.values(this.nodes).forEach((node) => {
+      const overlay = document.createElement("div");
+      // Use node-overlay class for identical styling, plus expanded-node-overlay for positioning
+      overlay.className = `node-overlay expanded-node-overlay ${node.type}`;
+      overlay.id = `expanded-overlay-${node.id}`;
+      overlay.dataset.nodeId = node.id;
+
+      // Exact same HTML structure as main overlay in index.html
+      // Plus a click-blocker overlay for non-current nodes
+      overlay.innerHTML = `
+        <div class="overlay-click-blocker"></div>
+        <div class="overlay-header">
+          <span class="node-badge ${node.type}">${formatNodeType(
+        node.type
+      )}</span>
+          <h3>${escapeHtml(node.label)}</h3>
+        </div>
+        <div class="overlay-description"></div>
+        <div class="overlay-cache">
+          <div class="section-header">
+            <span>Data</span>
+          </div>
+          <div class="cache-entries"></div>
+        </div>
+        <div class="overlay-actions"></div>
+      `;
+
+      // Click blocker - covers the whole overlay for non-current nodes
+      const clickBlocker = overlay.querySelector(".overlay-click-blocker");
+      clickBlocker.addEventListener("click", (e) => {
+        e.stopPropagation();
+        this.navigateToNode(node.id);
+      });
+
+      // Populate using same logic as main overlay
+      const descEl = overlay.querySelector(".overlay-description");
+      const description = node.metadata?.description || "";
+      if (description) {
+        descEl.innerHTML = marked.parse(description.trim());
+        descEl.style.display = "block";
+      } else {
+        descEl.style.display = "none";
+      }
+
+      // Render cache - same as renderOverlayData
+      const cacheContainer = overlay.querySelector(".cache-entries");
+      const cache = this.nodeCache.get(node.id) || {};
+      cacheContainer.innerHTML = CacheEditorHelpers.generateRows(
+        cache,
+        "Add key...",
+        escapeHtml
+      );
+      this.setupCacheEditorDelegation(cacheContainer, "expanded-" + node.id);
+
+      // Render actions - same as renderOverlayActions
+      const actionsContainer = overlay.querySelector(".overlay-actions");
+      if (node.type === "EndNode") {
+        actionsContainer.innerHTML =
+          '<div class="flow-complete">Flow completed! 🎉</div>';
+      } else {
+        const outgoingEdgeIds = this.graph.outgoingEdges[node.id] || [];
+        if (outgoingEdgeIds.length === 0) {
+          actionsContainer.innerHTML =
+            '<div class="flow-complete">Dead end</div>';
+        } else {
+          outgoingEdgeIds.forEach((edgeId, index) => {
+            const edge = this.edges[edgeId];
+            const targetNode = this.nodes[edge.target];
+            const btn = document.createElement("button");
+            btn.className = "edge-btn";
+            const label = edge.label || "Continue";
+            const shortcutHint =
+              index < 9
+                ? `<span class="shortcut-hint">${index + 1}</span>`
+                : "";
+            btn.innerHTML = `${shortcutHint}<span class="arrow">→</span>${label}<span class="target">${truncateLabel(
+              targetNode.label,
+              20
+            )}</span>`;
+            btn.addEventListener("click", (e) => {
+              e.stopPropagation();
+              this.navigateToNode(edge.target);
+            });
+            actionsContainer.appendChild(btn);
+          });
+        }
+      }
+
+      container.appendChild(overlay);
+    });
+
+    // Position all overlays and update edges
+    this.positionExpandedOverlays();
+    this.updateAllEdgesForExpandedOverlays();
+  }
+
+  /**
+   * Position all expanded overlays based on current zoom/pan
+   */
+  positionExpandedOverlays() {
+    if (!this.settings.alwaysExpandNodes) return;
+
+    const transform = d3.zoomTransform(this.svg.node());
+    const currentScale = transform.k / 1.6;
+
+    Object.values(this.nodes).forEach((node) => {
+      const overlay = document.getElementById(`expanded-overlay-${node.id}`);
+      if (!overlay) return;
+
+      const screenX = node.x * transform.k + transform.x;
+      const screenY = node.y * transform.k + transform.y;
+
+      overlay.style.left = `${screenX}px`;
+      overlay.style.top = `${screenY}px`;
+      overlay.style.transform = `translate(-50%, -50%) scale(${currentScale})`;
+      overlay.style.transformOrigin = "center center";
+
+      // Mark current node's overlay
+      overlay.classList.toggle("current", this.currentNode?.id === node.id);
+      overlay.classList.toggle("visited", this.visitedNodes.has(node.id));
+    });
+  }
+
+  /**
+   * Update all edge paths to connect to expanded overlays instead of collapsed nodes
+   */
+  updateAllEdgesForExpandedOverlays() {
+    if (!this.settings.alwaysExpandNodes) return;
+
+    // Build a map of expanded dimensions for each node
+    const expandedDimsMap = new Map();
+    Object.values(this.nodes).forEach((node) => {
+      const overlay = document.getElementById(`expanded-overlay-${node.id}`);
+      if (overlay) {
+        expandedDimsMap.set(node.id, {
+          width: overlay.offsetWidth / 1.6,
+          height: overlay.offsetHeight / 1.6,
+        });
+      }
+    });
+
+    // Update all edges using expanded dimensions
+    Object.values(this.edges).forEach((edge) => {
+      const source = this.nodes[edge.source];
+      const target = this.nodes[edge.target];
+      const sourceDims = expandedDimsMap.get(edge.source) || null;
+      const targetDims = expandedDimsMap.get(edge.target) || null;
+
+      const path = this.calculateEdgePath(
+        source,
+        target,
+        sourceDims,
+        targetDims
+      );
+      d3.select(`#edge-${edge.id}`).attr("d", path);
+      d3.select(`#edge-hit-${edge.id}`).attr("d", path);
+    });
+  }
+
+  /**
+   * Reset all edge paths to use collapsed node dimensions
+   */
+  resetAllEdgesToCollapsed() {
+    Object.values(this.edges).forEach((edge) => {
+      const source = this.nodes[edge.source];
+      const target = this.nodes[edge.target];
+      // Pass null for dimensions to use default collapsed size
+      const path = this.calculateEdgePath(source, target, null, null);
+      d3.select(`#edge-${edge.id}`).attr("d", path);
+      d3.select(`#edge-hit-${edge.id}`).attr("d", path);
+    });
+  }
+
   /**
    * Calculate edge path between two nodes.
    * @param {Object} source - Source node
@@ -810,7 +1642,11 @@ class FlowPlay {
     const angle = Math.atan2(dy, dx);
 
     const sourcePoint = this.getNodeEdgePoint(source, angle, sourceDims);
-    const targetPoint = this.getNodeEdgePoint(target, angle + Math.PI, targetDims);
+    const targetPoint = this.getNodeEdgePoint(
+      target,
+      angle + Math.PI,
+      targetDims
+    );
 
     const midX = (sourcePoint.x + targetPoint.x) / 2;
     const midY = (sourcePoint.y + targetPoint.y) / 2;
@@ -1207,126 +2043,22 @@ class FlowPlay {
   // =========================================
   setupSearch() {
     const searchInput = document.getElementById("node-search");
-    const searchResults = document.getElementById("search-results");
-    if (!searchInput || !searchResults) return;
+    if (!searchInput) return;
 
-    // Keyboard shortcut
+    // Clicking the search bar opens the command palette in node search mode
+    searchInput.addEventListener("focus", (e) => {
+      e.preventDefault();
+      searchInput.blur();
+      CommandPalette.open("nodes");
+    });
+
+    // Keyboard shortcut Cmd+K also opens node search
     document.addEventListener("keydown", (e) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "k") {
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key === "k") {
         e.preventDefault();
-        searchInput.focus();
-        searchInput.select();
+        CommandPalette.open("nodes");
       }
     });
-
-    searchInput.addEventListener("input", () => {
-      this.performSearch(searchInput.value);
-    });
-
-    searchInput.addEventListener("keydown", (e) => {
-      if (e.key === "ArrowDown") {
-        e.preventDefault();
-        this.searchSelectedIndex = Math.min(
-          this.searchSelectedIndex + 1,
-          this.searchResults.length - 1
-        );
-        this.renderSearchResults();
-      } else if (e.key === "ArrowUp") {
-        e.preventDefault();
-        this.searchSelectedIndex = Math.max(this.searchSelectedIndex - 1, 0);
-        this.renderSearchResults();
-      } else if (e.key === "Enter") {
-        e.preventDefault();
-        if (
-          this.searchSelectedIndex >= 0 &&
-          this.searchResults[this.searchSelectedIndex]
-        ) {
-          this.navigateToNode(this.searchResults[this.searchSelectedIndex].id);
-          this.clearSearch();
-        }
-      } else if (e.key === "Escape") {
-        this.clearSearch();
-        searchInput.blur();
-      }
-    });
-
-    searchInput.addEventListener("blur", () => {
-      // Delay to allow click on results
-      setTimeout(() => this.clearSearch(), 200);
-    });
-  }
-
-  performSearch(query) {
-    const searchResults = document.getElementById("search-results");
-    if (!query.trim()) {
-      searchResults.classList.add("hidden");
-      this.searchResults = [];
-      return;
-    }
-
-    const lowerQuery = query.toLowerCase();
-    this.searchResults = Object.values(this.nodes)
-      .filter(
-        (node) =>
-          node.label.toLowerCase().includes(lowerQuery) ||
-          node.id.toLowerCase().includes(lowerQuery) ||
-          (node.metadata?.description || "").toLowerCase().includes(lowerQuery)
-      )
-      .slice(0, 10);
-
-    this.searchSelectedIndex = this.searchResults.length > 0 ? 0 : -1;
-    this.renderSearchResults();
-  }
-
-  renderSearchResults() {
-    const searchResults = document.getElementById("search-results");
-
-    if (this.searchResults.length === 0) {
-      searchResults.innerHTML =
-        '<div class="search-no-results">No nodes found</div>';
-      searchResults.classList.remove("hidden");
-      return;
-    }
-
-    searchResults.innerHTML = this.searchResults
-      .map(
-        (node, i) => `
-            <div class="search-result-item ${
-              i === this.searchSelectedIndex ? "selected" : ""
-            }" data-node-id="${node.id}">
-                <div class="node-type-indicator" style="background: var(--node-${
-                  node.type === "StartNode"
-                    ? "start"
-                    : node.type === "EndNode"
-                    ? "end"
-                    : node.type === "DecisionNode"
-                    ? "decision"
-                    : "process"
-                })"></div>
-                <span class="node-name">${escapeHtml(node.label)}</span>
-                <span class="node-id">${node.id}</span>
-            </div>
-        `
-      )
-      .join("");
-
-    searchResults.querySelectorAll(".search-result-item").forEach((item) => {
-      item.addEventListener("click", () => {
-        this.navigateToNode(item.dataset.nodeId);
-        this.clearSearch();
-      });
-    });
-
-    searchResults.classList.remove("hidden");
-  }
-
-  clearSearch() {
-    const searchInput = document.getElementById("node-search");
-    const searchResults = document.getElementById("search-results");
-    if (searchInput) searchInput.value = "";
-    if (searchResults) searchResults.classList.add("hidden");
-    this.searchResults = [];
-    this.searchSelectedIndex = -1;
   }
 
   // =========================================
@@ -1522,9 +2254,7 @@ class FlowPlay {
                 <span class="preview-badge ${node.type}">${formatNodeType(
       node.type
     )}</span>
-                <span class="preview-title">${escapeHtml(
-                  node.label
-                )}</span>
+                <span class="preview-title">${escapeHtml(node.label)}</span>
             </div>
             ${
               shortDesc
@@ -1573,9 +2303,9 @@ class FlowPlay {
     tooltip.innerHTML = `
             ${labelHtml}
             <div class="preview-header">
-                <span class="preview-badge ${
-                  targetNode.type
-                }">${formatNodeType(targetNode.type)}</span>
+                <span class="preview-badge ${targetNode.type}">${formatNodeType(
+      targetNode.type
+    )}</span>
                 <span class="preview-title">${escapeHtml(
                   targetNode.label
                 )}</span>
@@ -1780,7 +2510,12 @@ class FlowPlay {
       .selectAll(".node-group")
       .classed("current", false)
       .classed("visited", false);
-    this.g.selectAll(".node-collapsed").style("opacity", 1);
+
+    // Only show collapsed nodes if not in alwaysExpandNodes mode
+    if (!this.settings.alwaysExpandNodes) {
+      this.g.selectAll(".node-collapsed").style("opacity", 1);
+    }
+
     this.g
       .selectAll(".edge-path")
       .classed("incoming", false)
@@ -1788,6 +2523,13 @@ class FlowPlay {
 
     // Hide overlay
     document.getElementById("node-overlay").classList.add("hidden");
+
+    // Reset expanded overlay states if enabled
+    if (this.settings.alwaysExpandNodes) {
+      document.querySelectorAll(".expanded-node-overlay").forEach((el) => {
+        el.classList.remove("current", "visited");
+      });
+    }
 
     // Start fresh
     this.start();
@@ -1810,23 +2552,48 @@ class FlowPlay {
     // Reset keyboard edge selection to first edge
     this.selectedEdgeIndex = 0;
 
-    // Hide overlay during transition
-    document.getElementById("node-overlay").classList.add("hidden");
+    // Hide main overlay during transition (only used when not in always-expand mode)
+    if (!this.settings.alwaysExpandNodes) {
+      document.getElementById("node-overlay").classList.add("hidden");
+    }
 
     // Hide node preview tooltip
     this.hideNodePreview();
 
     // Restore visibility of previous node's collapsed shape and reset edge paths
-    if (prevNode) {
+    if (prevNode && !this.settings.alwaysExpandNodes) {
       d3.select(`#node-${prevNode.id} .node-collapsed`).style("opacity", 1);
+      this.resetEdgesForNode(prevNode.id);
+    }
+
+    // Update SVG node classes
+    if (prevNode) {
       d3.select(`#node-${prevNode.id}`)
         .classed("current", false)
         .classed("visited", true);
-      this.resetEdgesForNode(prevNode.id);
     }
 
     // Update visual state
     d3.select(`#node-${node.id}`).classed("current", true);
+
+    // Update expanded overlay states if enabled
+    if (this.settings.alwaysExpandNodes) {
+      if (prevNode) {
+        const prevOverlay = document.getElementById(
+          `expanded-overlay-${prevNode.id}`
+        );
+        if (prevOverlay) {
+          prevOverlay.classList.remove("current");
+          prevOverlay.classList.add("visited");
+        }
+      }
+      const currentOverlay = document.getElementById(
+        `expanded-overlay-${node.id}`
+      );
+      if (currentOverlay) {
+        currentOverlay.classList.add("current");
+      }
+    }
 
     // Highlight edges
     this.updateEdgeHighlights();
@@ -1842,6 +2609,19 @@ class FlowPlay {
 
     // Zoom to node (overlay shown after zoom completes)
     this.zoomToNode(node);
+
+    // In always-expand mode, highlight the first edge button of the new current node
+    if (this.settings.alwaysExpandNodes) {
+      // Clear keyboard-selected from all edge buttons first
+      document.querySelectorAll(".expanded-node-overlay .edge-btn.keyboard-selected").forEach(btn => {
+        btn.classList.remove("keyboard-selected");
+      });
+      // Highlight the first edge button of the current node
+      const buttons = this.getCurrentEdgeButtons();
+      if (buttons.length > 0) {
+        this.highlightEdgeButton(buttons);
+      }
+    }
   }
 
   updateEdgeHighlights() {
@@ -1928,11 +2708,13 @@ class FlowPlay {
     overlay.style.transformOrigin = "center center";
     overlay.classList.remove("hidden");
 
-    // Hide the collapsed SVG node so only overlay shows
-    d3.select(`#node-${this.currentNode.id} .node-collapsed`).style(
-      "opacity",
-      0
-    );
+    // Hide the collapsed SVG node so only overlay shows (unless alwaysExpandNodes is on)
+    if (!this.settings.alwaysExpandNodes) {
+      d3.select(`#node-${this.currentNode.id} .node-collapsed`).style(
+        "opacity",
+        0
+      );
+    }
 
     // Auto-select first edge button for keyboard navigation
     const buttons = document.querySelectorAll("#overlay-actions .edge-btn");
@@ -1941,14 +2723,20 @@ class FlowPlay {
     }
 
     // Recalculate edge positions for the expanded overlay size
-    this.updateEdgesForExpandedNode(overlay);
+    // Skip in alwaysExpandNodes mode - edges are already calculated for all expanded overlays
+    if (!this.settings.alwaysExpandNodes) {
+      this.updateEdgesForExpandedNode(overlay);
+    }
   }
 
   /**
    * Update edge paths to connect to the expanded overlay instead of the collapsed node
+   * Only used in normal mode - in alwaysExpandNodes mode, use updateAllEdgesForExpandedOverlays()
    */
   updateEdgesForExpandedNode(overlay) {
     if (!this.currentNode) return;
+    // Skip in alwaysExpandNodes mode - edges are managed by updateAllEdgesForExpandedOverlays
+    if (this.settings.alwaysExpandNodes) return;
 
     // Get overlay dimensions in SVG coordinate space (scaled by 1/1.6)
     const expandedDims = {
@@ -1964,7 +2752,12 @@ class FlowPlay {
     incomingEdgeIds.forEach((edgeId) => {
       const edge = this.edges[edgeId];
       const source = this.nodes[edge.source];
-      const path = this.calculateEdgePath(source, this.currentNode, null, expandedDims);
+      const path = this.calculateEdgePath(
+        source,
+        this.currentNode,
+        null,
+        expandedDims
+      );
       d3.select(`#edge-${edgeId}`).attr("d", path);
       d3.select(`#edge-hit-${edgeId}`).attr("d", path);
     });
@@ -1973,7 +2766,12 @@ class FlowPlay {
     outgoingEdgeIds.forEach((edgeId) => {
       const edge = this.edges[edgeId];
       const target = this.nodes[edge.target];
-      const path = this.calculateEdgePath(this.currentNode, target, expandedDims, null);
+      const path = this.calculateEdgePath(
+        this.currentNode,
+        target,
+        expandedDims,
+        null
+      );
       d3.select(`#edge-${edgeId}`).attr("d", path);
       d3.select(`#edge-hit-${edgeId}`).attr("d", path);
     });
@@ -2011,10 +2809,6 @@ class FlowPlay {
 
     // Update actions
     this.renderOverlayActions();
-
-    // Bind add cache button (NO - using dynamic empty row now)
-    // const addBtn = document.getElementById('overlay-add-cache');
-    // if (addBtn) addBtn.onclick = ...;
   }
 
   renderOverlayData() {
@@ -2091,7 +2885,8 @@ class FlowPlay {
       if (
         !e.target.classList.contains("cache-key") &&
         !e.target.classList.contains("cache-value")
-      ) return;
+      )
+        return;
 
       const cache =
         cacheType === "node"
@@ -2107,20 +2902,28 @@ class FlowPlay {
 
       if (needsRerender) {
         const wasKey = e.target.classList.contains("cache-key");
-        const renderFn = cacheType === "node" ? "renderOverlayData" : "renderGlobalCache";
+        const renderFn =
+          cacheType === "node" ? "renderOverlayData" : "renderGlobalCache";
         this[renderFn]();
 
         // Focus restoration after re-render
         const containerSelector =
-          cacheType === "node" ? "#overlay-cache-entries" : "#global-cache-entries";
+          cacheType === "node"
+            ? "#overlay-cache-entries"
+            : "#global-cache-entries";
         const updatedContainer = document.querySelector(containerSelector);
         const newRows = updatedContainer.querySelectorAll(".cache-row");
         const targetRow = newRows[newRows.length - 2];
         if (targetRow) {
-          const toFocus = targetRow.querySelector(wasKey ? ".cache-key" : ".cache-value");
+          const toFocus = targetRow.querySelector(
+            wasKey ? ".cache-key" : ".cache-value"
+          );
           if (toFocus) {
             toFocus.focus();
-            toFocus.setSelectionRange(toFocus.value.length, toFocus.value.length);
+            toFocus.setSelectionRange(
+              toFocus.value.length,
+              toFocus.value.length
+            );
           }
         }
       }
@@ -2286,8 +3089,25 @@ class FlowPlay {
     }
   }
 
+  /**
+   * Get the edge buttons for the current node (works in both normal and always-expand modes)
+   */
+  getCurrentEdgeButtons() {
+    if (this.settings.alwaysExpandNodes && this.currentNode) {
+      // In always-expand mode, find buttons in the current node's expanded overlay
+      const overlay = document.getElementById(`expanded-overlay-${this.currentNode.id}`);
+      if (overlay) {
+        return overlay.querySelectorAll(".overlay-actions .edge-btn");
+      }
+      return [];
+    } else {
+      // In normal mode, use the main overlay
+      return document.querySelectorAll("#overlay-actions .edge-btn");
+    }
+  }
+
   selectNextEdge() {
-    const buttons = document.querySelectorAll("#overlay-actions .edge-btn");
+    const buttons = this.getCurrentEdgeButtons();
     if (buttons.length === 0) return;
 
     this.selectedEdgeIndex = Math.min(
@@ -2298,7 +3118,7 @@ class FlowPlay {
   }
 
   selectPrevEdge() {
-    const buttons = document.querySelectorAll("#overlay-actions .edge-btn");
+    const buttons = this.getCurrentEdgeButtons();
     if (buttons.length === 0) return;
 
     if (this.selectedEdgeIndex < 0) this.selectedEdgeIndex = 0;
@@ -2313,7 +3133,7 @@ class FlowPlay {
   }
 
   activateSelectedEdge() {
-    const buttons = document.querySelectorAll("#overlay-actions .edge-btn");
+    const buttons = this.getCurrentEdgeButtons();
     if (
       this.selectedEdgeIndex >= 0 &&
       this.selectedEdgeIndex < buttons.length
@@ -2422,65 +3242,12 @@ class FlowPlay {
   // =========================================
   setupSettingsPanel() {
     const settingsBtn = document.getElementById("settings-btn");
-    const settingsOverlay = document.getElementById("settings-overlay");
-    const settingsPanel = document.getElementById("settings-panel");
-    const settingsClose = document.getElementById("settings-close");
-    if (!settingsBtn || !settingsOverlay || !settingsPanel) return;
+    if (!settingsBtn) return;
 
-    // Open modal
+    // Settings button opens command palette
     settingsBtn.addEventListener("click", () => {
-      settingsOverlay.classList.remove("hidden");
+      CommandPalette.open("commands");
     });
-
-    // Close modal
-    const closeModal = () => {
-      settingsOverlay.classList.add("hidden");
-    };
-
-    if (settingsClose) {
-      settingsClose.addEventListener("click", closeModal);
-    }
-
-    // Close when clicking overlay background
-    settingsOverlay.addEventListener("click", (e) => {
-      if (e.target === settingsOverlay) {
-        closeModal();
-      }
-    });
-
-    // Close on Escape key
-    document.addEventListener("keydown", (e) => {
-      if (e.key === "Escape" && !settingsOverlay.classList.contains("hidden")) {
-        closeModal();
-      }
-    });
-
-    // Setup toggle handlers
-    const toggles = settingsPanel.querySelectorAll(".setting-toggle");
-    toggles.forEach((toggle) => {
-      const settingKey = toggle.dataset.setting;
-      if (settingKey && this.settings.hasOwnProperty(settingKey)) {
-        toggle.checked = this.settings[settingKey];
-        toggle.addEventListener("change", () => {
-          this.settings[settingKey] = toggle.checked;
-          SettingsManager.save(this.settings);
-          this.applySettings();
-        });
-      }
-    });
-
-    // Setup default zoom input
-    const zoomInput = document.getElementById("default-zoom-input");
-    if (zoomInput) {
-      zoomInput.value = this.settings.defaultZoomLevel;
-      zoomInput.addEventListener("change", () => {
-        const value = parseFloat(zoomInput.value);
-        if (!isNaN(value) && value >= 0.5 && value <= 3) {
-          this.settings.defaultZoomLevel = value;
-          SettingsManager.save(this.settings);
-        }
-      });
-    }
   }
 
   applySettings() {
@@ -2517,6 +3284,17 @@ class FlowPlay {
         controls.classList.remove("auto-hidden");
         clearTimeout(this.autoHideTimeout);
       }
+    }
+
+    // Always expand nodes - show overlays for all nodes
+    document.body.classList.toggle(
+      "always-expand-nodes",
+      this.settings.alwaysExpandNodes
+    );
+
+    // Setup or tear down expanded overlays
+    if (this.nodes && Object.keys(this.nodes).length > 0) {
+      this.setupExpandedOverlays();
     }
   }
 
