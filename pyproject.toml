@@ -6,22 +6,22 @@ build-backend = "setuptools.build_meta"
 name = "flowly"
 version = "0.1.0"
 description = "A flexible flowchart library with IR, execution engine, and serialization."
-authors = [
-    {name = "User", email = "user@example.com"},
-]
-dependencies = [
-    "graphviz"
-]
+authors = [{ name = "User", email = "user@example.com" }]
+dependencies = ["graphviz", "importlib_resources>=5.0; python_version < '3.9'"]
 requires-python = ">=3.8"
 
 [project.optional-dependencies]
-dev = [
-    "pytest",
-    "mypy",
-    "black",
-    "flake8"
-]
+dev = ["pytest", "mypy", "black", "flake8"]
+
+[project.scripts]
+flowly = "flowly.cli:main"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+
+[tool.setuptools.packages.find]
+include = ["flowly*"]
+
+[tool.setuptools.package-data]
+flowly = ["../flowplay/*.html", "../flowplay/*.css", "../flowplay/*.js"]

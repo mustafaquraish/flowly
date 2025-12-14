@@ -1,0 +1,37 @@
+# Tasks
+
+- [x] Design `flowir` specification <!-- id: 0 -->
+    - [x] Define abstract node types (Process, Decision, Start, End) <!-- id: 1 -->
+    - [x] Define edge structure and conditional logic <!-- id: 2 -->
+    - [x] Define state/context management for interactive walks <!-- id: 3 -->
+- [x] Implement Core `flowir` library <!-- id: 4 -->
+    - [x] Node and Graph classes <!-- id: 5 -->
+    - [ ] Serialization/Deserialization (JSON/YAML) <!-- id: 6 -->
+- [x] Implement Interactive Engine <!-- id: 7 -->
+    - [x] Walker/Runner class <!-- id: 8 -->
+    - [x] State management <!-- id: 9 -->
+- [/] Implement Backends <!-- id: 14 -->
+    - [x] Mermaid exporter <!-- id: 15 -->
+    - [x] SVG/Graphviz exporter <!-- id: 16 -->
+    - [x] Create standalone Web Player App (flowplay) <!-- id: 24 -->
+        - [x] Implement core player logic in JS <!-- id: 26 -->
+        - [x] Load JSON artifact from python build <!-- id: 27 -->
+        - [x] Implement "Zoom-in" Focus Mode UI <!-- id: 28 -->
+        - [x] Refactor to Node-based Cache <!-- id: 30 -->
+        - [x] Implement Visual Diagram UI (Canvas-like) <!-- id: 31 -->
+- [/] Implement Frontends <!-- id: 10 -->
+    - [x] Python Builder API (Fluent interface) <!-- id: 11 -->
+    - [ ] Python AST to Flowir converter <!-- id: 12 -->
+      - [ ] Custom primitive for creating nodes with descrioptions, etc.
+      - [ ] Custom primitive for creating branches/decisions
+      - [ ] Support function definitions and calls as sub-flows with a decorator
+      - [ ] Support for loops, recursion, and complex control flow etc all compiled into the proper flowchart graph structure
+      - [ ] Comprehensive testing and examples
+    - [ ] Custom DSL (Future) <!-- id: 13 -->
+- [x] Quality Assurance & Documentation <!-- id: 18 -->
+    - [x] Setup `pytest` and comprehensive test suite <!-- id: 19 -->
+    - [x] Create [docs/index.md](file:///Users/mustafa/dev/flowly/docs/index.md) and [docs/testing_conventions.md](file:///Users/mustafa/dev/flowly/docs/testing_conventions.md) <!-- id: 20 -->
+    - [x] Ensure full type annotations <!-- id: 21 -->
+    - [x] Implement serialization (JSON/YAML) <!-- id: 6 -->
+    - [x] Create shared complex baseline flowchart for tests <!-- id: 22 -->
+    - [x] Configure [build/](file:///Users/mustafa/dev/flowly/flowly/frontend/builder.py#39-41) artifacts and [.gitignore](file:///Users/mustafa/dev/flowly/.gitignore) <!-- id: 23 -->

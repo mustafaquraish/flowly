@@ -137,7 +137,7 @@ const CommandPalette = {
   isOpen: false,
   mode: "commands", // 'commands' or 'nodes'
   keyboardIndex: 0, // Keyboard focus index (separate from hover)
-  hoverIndex: -1,   // Hover focus index (-1 means no hover)
+  hoverIndex: -1, // Hover focus index (-1 means no hover)
   isCommandKeyHeld: false, // Track if command/ctrl key is held
   results: [],
   app: null, // Reference to FlowPlay instance
@@ -201,8 +201,20 @@ const CommandPalette = {
       action: "restart",
       shortcut: "R",
     },
-    { id: "zoom-in", label: "Zoom In", category: "View", action: "zoomIn", shortcut: "+" },
-    { id: "zoom-out", label: "Zoom Out", category: "View", action: "zoomOut", shortcut: "-" },
+    {
+      id: "zoom-in",
+      label: "Zoom In",
+      category: "View",
+      action: "zoomIn",
+      shortcut: "+",
+    },
+    {
+      id: "zoom-out",
+      label: "Zoom Out",
+      category: "View",
+      action: "zoomOut",
+      shortcut: "-",
+    },
     {
       id: "fit-view",
       label: "Fit All Nodes in View",
@@ -526,7 +538,9 @@ const CommandPalette = {
     const match = plain.match(/^[^.!?]*[.!?]/);
     if (match) {
       const sentence = match[0].trim();
-      return sentence.length > 80 ? sentence.substring(0, 77) + "..." : sentence;
+      return sentence.length > 80
+        ? sentence.substring(0, 77) + "..."
+        : sentence;
     }
     // No sentence end found, truncate
     return plain.length > 80 ? plain.substring(0, 77) + "..." : plain;
@@ -553,9 +567,14 @@ const CommandPalette = {
       .map((item, idx) => {
         const isKeyboardSelected = idx === this.keyboardIndex;
         const isHoverSelected = idx === this.hoverIndex;
-        const selectedClass = isKeyboardSelected ? "selected" : (isHoverSelected ? "hover" : "");
+        const selectedClass = isKeyboardSelected
+          ? "selected"
+          : isHoverSelected
+          ? "hover"
+          : "";
         // Always include quick number span for items 1-9 (hidden by CSS, shown when Cmd held)
-        const quickNumber = idx < 9 ? `<span class="quick-number">${idx + 1}</span>` : "";
+        const quickNumber =
+          idx < 9 ? `<span class="quick-number">${idx + 1}</span>` : "";
 
         if (item.type === "command") {
           const icon = item.settingKey
@@ -564,7 +583,11 @@ const CommandPalette = {
               : "○"
             : "›";
           // Show shortcut if available
-          const shortcutHtml = item.shortcut ? `<span class="command-shortcut">${escapeHtml(item.shortcut)}</span>` : "";
+          const shortcutHtml = item.shortcut
+            ? `<span class="command-shortcut">${escapeHtml(
+                item.shortcut
+              )}</span>`
+            : "";
           return `
             <div class="command-item ${selectedClass}" data-index="${idx}">
               ${quickNumber}
@@ -593,7 +616,9 @@ const CommandPalette = {
             <div class="command-item node-item ${selectedClass}" data-index="${idx}">
               ${quickNumber}
               <span class="node-type-dot ${nodeTypeClass}"></span>
-              <span class="command-label">${escapeHtml(item.label)}${isCurrent ? " <em>(current)</em>" : ""}</span>
+              <span class="command-label">${escapeHtml(item.label)}${
+            isCurrent ? " <em>(current)</em>" : ""
+          }</span>
               <span class="command-category">${escapeHtml(secondaryText)}</span>
             </div>
           `;
@@ -612,7 +637,7 @@ const CommandPalette = {
   attachResultListeners() {
     this.resultsElement.querySelectorAll(".command-item").forEach((el) => {
       const idx = parseInt(el.dataset.index, 10);
-      
+
       // Click to execute
       el.addEventListener("click", (e) => {
         e.preventDefault();
@@ -620,16 +645,18 @@ const CommandPalette = {
         this.keyboardIndex = idx;
         this.executeSelected();
       });
-      
+
       // Mouseenter/leave only update visual state, don't re-render
       el.addEventListener("mouseenter", () => {
         // Just update visual classes, don't call renderResults
-        this.resultsElement.querySelectorAll(".command-item").forEach((item, i) => {
-          item.classList.toggle("hover", i === idx);
-        });
+        this.resultsElement
+          .querySelectorAll(".command-item")
+          .forEach((item, i) => {
+            item.classList.toggle("hover", i === idx);
+          });
         this.hoverIndex = idx;
       });
-      
+
       el.addEventListener("mouseleave", () => {
         el.classList.remove("hover");
         this.hoverIndex = -1;
@@ -1098,24 +1125,27 @@ class FlowPlay {
     let flowData = null;
     let errorMessage = "Failed to load flowchart";
 
-    try {
-      const response = await fetch("./complex_flow.json");
-      if (response.ok) {
-        flowData = await response.json();
-      }
-    } catch (e) {
-      // Fall through to bundled data
+    // First, check for bundled data (standalone HTML export)
+    if (typeof bundledFlowJSON !== "undefined" && bundledFlowJSON !== null) {
+      flowData = bundledFlowJSON;
+      console.log("Using bundled flow JSON data");
     }
 
-    // Try bundled data as fallback
+    // Fall back to fetching from file (development mode)
     if (!flowData) {
-      flowData =
-        typeof bundledFlowData !== "undefined" ? bundledFlowData : null;
-      if (flowData) {
-        console.log("Using bundled json data!");
-      } else {
-        throw new Error(errorMessage);
+      try {
+        const response = await fetch("./complex_flow.json");
+        if (response.ok) {
+          flowData = await response.json();
+          console.log("Loaded flow data from complex_flow.json");
+        }
+      } catch (e) {
+        // Fall through to error
       }
+    }
+
+    if (!flowData) {
+      throw new Error(errorMessage);
     }
 
     // Initialize state with flow data
@@ -2613,9 +2643,11 @@ class FlowPlay {
     // In always-expand mode, highlight the first edge button of the new current node
     if (this.settings.alwaysExpandNodes) {
       // Clear keyboard-selected from all edge buttons first
-      document.querySelectorAll(".expanded-node-overlay .edge-btn.keyboard-selected").forEach(btn => {
-        btn.classList.remove("keyboard-selected");
-      });
+      document
+        .querySelectorAll(".expanded-node-overlay .edge-btn.keyboard-selected")
+        .forEach((btn) => {
+          btn.classList.remove("keyboard-selected");
+        });
       // Highlight the first edge button of the current node
       const buttons = this.getCurrentEdgeButtons();
       if (buttons.length > 0) {
@@ -3095,7 +3127,9 @@ class FlowPlay {
   getCurrentEdgeButtons() {
     if (this.settings.alwaysExpandNodes && this.currentNode) {
       // In always-expand mode, find buttons in the current node's expanded overlay
-      const overlay = document.getElementById(`expanded-overlay-${this.currentNode.id}`);
+      const overlay = document.getElementById(
+        `expanded-overlay-${this.currentNode.id}`
+      );
       if (overlay) {
         return overlay.querySelectorAll(".overlay-actions .edge-btn");
       }

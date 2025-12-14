@@ -1,0 +1,3 @@
+include flowplay/*.html
+include flowplay/*.css
+include flowplay/*.js
