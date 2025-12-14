@@ -19,15 +19,14 @@
         - [x] Implement "Zoom-in" Focus Mode UI <!-- id: 28 -->
         - [x] Refactor to Node-based Cache <!-- id: 30 -->
         - [x] Implement Visual Diagram UI (Canvas-like) <!-- id: 31 -->
-- [/] Implement Frontends <!-- id: 10 -->
+- [x] Implement Frontends <!-- id: 10 -->
     - [x] Python Builder API (Fluent interface) <!-- id: 11 -->
-    - [ ] Python AST to Flowir converter <!-- id: 12 -->
-      - [ ] Custom primitive for creating nodes with descrioptions, etc.
-      - [ ] Custom primitive for creating branches/decisions
-      - [ ] Support function definitions and calls as sub-flows with a decorator
-      - [ ] Support for loops, recursion, and complex control flow etc all compiled into the proper flowchart graph structure
-      - [ ] Comprehensive testing and examples
-    - [ ] Custom DSL (Future) <!-- id: 13 -->
+    - [x] Python DSL with AST analysis (`dsl.py`) <!-- id: 12 -->
+      - [x] Explicit Node() and Decision() definitions with metadata
+      - [x] AST-based analysis for control flow (if/else, while)
+      - [x] Support for node reuse across branches
+      - [x] Comprehensive testing
+    - [x] Runtime tracer (`tracer.py`) for executed path tracing <!-- id: 13 -->
 - [x] Quality Assurance & Documentation <!-- id: 18 -->
     - [x] Setup `pytest` and comprehensive test suite <!-- id: 19 -->
     - [x] Create [docs/index.md](file:///Users/mustafa/dev/flowly/docs/index.md) and [docs/testing_conventions.md](file:///Users/mustafa/dev/flowly/docs/testing_conventions.md) <!-- id: 20 -->

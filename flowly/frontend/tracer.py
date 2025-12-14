@@ -53,9 +53,6 @@ class FlowTracer:
         # For automatic edge labeling from decisions/loops
         self._pending_edge_label: Optional[str] = None
         
-        # Stack for tracking decision points (for connecting else branches)
-        self._decision_stack: List[Dict[str, Any]] = []
-        
         # Stack for tracking loop entry points (for back-edges)
         self._loop_stack: List[Dict[str, Any]] = []
         
@@ -153,14 +150,6 @@ class FlowTracer:
         if self._current_node:
             self._connect(self._current_node, decision_node)
         
-        # Push decision context for tracking branches
-        self._decision_stack.append({
-            "node": decision_node,
-            "result": result,
-            "branch_taken": "Yes" if result else "No",
-            "exit_nodes": [],  # Nodes that should connect to merge point
-        })
-        
         # Set pending edge label for the branch we're taking
         self._pending_edge_label = "Yes" if result else "No"
         
@@ -169,41 +158,6 @@ class FlowTracer:
         self._current_node = decision_node
         
         return result
-    
-    def end_decision(self) -> None:
-        """
-        Mark the end of a decision block (called after if/else completes).
-        
-        This creates a merge point for the branches.
-        """
-        if not self._decision_stack:
-            raise RuntimeError("end_decision() called without matching decision()")
-        
-        ctx = self._decision_stack.pop()
-        
-        # The current node is the last node of the taken branch
-        # We'll record it so future nodes connect properly
-        # (In simple cases, current_node is already correct)
-    
-    def branch(self, label: str) -> None:
-        """
-        Start a new branch from the current decision node.
-        
-        This is used to label the edge to the current branch.
-        Should be called right after entering an if/else block.
-        """
-        if not self._decision_stack:
-            raise RuntimeError("branch() called outside of decision context")
-        
-        ctx = self._decision_stack[-1]
-        decision_node = ctx["node"]
-        
-        # Update the last edge's label if it connects from the decision
-        # (The edge was created when we called node() after decision())
-        for edge in reversed(self._flowchart.edges):
-            if edge.source_id == decision_node.id and edge.label is None:
-                edge.label = label
-                break
     
     def until(self, condition: str, result: bool = False, description: Optional[str] = None) -> bool:
         """
