@@ -21,6 +21,7 @@
             <div id="node-overlay" class="node-overlay hidden">
                 <button id="overlay-close" class="overlay-close-btn" title="Close (Esc)">&times;</button>
                 <button id="overlay-back" class="overlay-back-btn hidden" title="Go back (B)">←</button>
+                <div id="overlay-breadcrumb" class="overlay-breadcrumb"></div>
                 <div class="overlay-header">
                     <span class="node-badge" id="overlay-badge">NODE</span>
                     <h3 id="overlay-title">Node Title</h3>
@@ -47,16 +48,37 @@
             <button id="restart-btn" class="btn btn-secondary" title="Restart flow (R)">↺</button>
             <div class="control-divider"></div>
             <button id="zoom-out" class="btn btn-secondary" title="Zoom out (-)">−</button>
+            <span id="zoom-level" class="zoom-level" title="Click to reset">100%</span>
             <button id="zoom-in" class="btn btn-secondary" title="Zoom in (+)">+</button>
             <button id="fit-view" class="btn btn-secondary" title="Fit to view (F)">⛶</button>
             <div class="control-divider"></div>
-            <button id="help-btn" class="btn btn-secondary" title="Keyboard shortcuts">?</button>
+            <button id="export-btn" class="btn btn-secondary" title="Export session state">⬇</button>
+            <button id="help-btn" class="btn btn-secondary" title="Keyboard shortcuts (?)">?</button>
+        </div>
+        
+        <!-- Search box -->
+        <div id="search-container" class="glass-panel">
+            <input type="text" id="node-search" placeholder="Search nodes... (Ctrl+K)" autocomplete="off" />
+            <div id="search-results" class="hidden"></div>
+        </div>
+        
+        <!-- Progress indicator -->
+        <div id="progress-indicator" class="glass-panel">
+            <span id="progress-text">0 / 0 visited</span>
+            <div id="progress-bar"><div id="progress-fill"></div></div>
+        </div>
+        
+        <!-- Mini-map -->
+        <div id="mini-map" class="glass-panel">
+            <canvas id="mini-map-canvas"></canvas>
+            <div id="mini-map-viewport"></div>
         </div>
         
         <!-- Keyboard shortcuts help -->
         <div id="shortcuts-panel" class="glass-panel hidden">
             <div class="shortcuts-header">Keyboard Shortcuts</div>
             <div class="shortcuts-list">
+                <div class="shortcut"><kbd>Ctrl+K</kbd> Search nodes</div>
                 <div class="shortcut"><kbd>1-9</kbd> Select edge option</div>
                 <div class="shortcut"><kbd>↑↓</kbd> Navigate edges</div>
                 <div class="shortcut"><kbd>Enter</kbd> Activate selected</div>
@@ -65,6 +87,7 @@
                 <div class="shortcut"><kbd>R</kbd> Restart</div>
                 <div class="shortcut"><kbd>F</kbd> Fit to view</div>
                 <div class="shortcut"><kbd>+/-</kbd> Zoom</div>
+                <div class="shortcut"><kbd>?</kbd> Toggle this help</div>
             </div>
         </div>
         

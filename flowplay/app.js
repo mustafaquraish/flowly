@@ -146,6 +146,7 @@ class FlowPlay {
         // Navigation state
         this.currentNode = null;
         this.history = [];
+        this.historyIndex = -1; // Current position in history for time-travel
         this.visitedNodes = new Set();
         this.historyExpanded = false;
         
@@ -160,21 +161,54 @@ class FlowPlay {
         this.nodeWidth = 160;
         this.nodeHeight = 70;
         
+        // UI state
+        this.searchResults = [];
+        this.searchSelectedIndex = -1;
+        this.nodePreviewTooltip = null;
+        this.edgeLabelTooltip = null;
+        this.autoHideTimeout = null;
+        this.lastInteractionTime = Date.now();
+        
         // Bind methods
         this.handleZoom = this.handleZoom.bind(this);
     }
     
     async init() {
         try {
+            this.showLoading(true);
             await this.loadFlowData();
             this.setupSVG();
             this.renderFlowchart();
             this.setupControls();
             this.setupOverlayControls();
+            this.setupSearch();
+            this.setupMiniMap();
+            this.setupNodePreview();
+            this.setupAutoHide();
             this.start();
+            this.showLoading(false);
         } catch (error) {
             console.error('Failed to initialize FlowPlay:', error);
             document.getElementById('flowchart-name').textContent = 'Error loading flowchart';
+            this.showLoading(false);
+        }
+    }
+    
+    showLoading(show) {
+        let indicator = document.getElementById('loading-indicator');
+        if (show) {
+            if (!indicator) {
+                indicator = document.createElement('div');
+                indicator.id = 'loading-indicator';
+                indicator.innerHTML = `
+                    <div class="loading-spinner"></div>
+                    <div class="loading-text">Loading flowchart...</div>
+                `;
+                document.getElementById('app').appendChild(indicator);
+            }
+            indicator.style.display = 'flex';
+        } else if (indicator) {
+            indicator.style.display = 'none';
         }
     }
     
@@ -227,30 +261,30 @@ class FlowPlay {
         // Add defs for arrow markers
         const defs = this.svg.append('defs');
         
-        // Normal arrow
+        // Normal arrow - refX adjusted to position arrow at end of line
         defs.append('marker')
             .attr('id', 'arrow')
             .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 8)
+            .attr('refX', 10)
             .attr('refY', 0)
-            .attr('markerWidth', 6)
-            .attr('markerHeight', 6)
+            .attr('markerWidth', 8)
+            .attr('markerHeight', 8)
             .attr('orient', 'auto')
             .append('path')
-            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('d', 'M0,-4L10,0L0,4')
             .attr('class', 'edge-arrow');
         
         // Incoming arrow (highlighted)
         defs.append('marker')
             .attr('id', 'arrow-incoming')
             .attr('viewBox', '0 -5 10 10')
-            .attr('refX', 8)
+            .attr('refX', 10)
             .attr('refY', 0)
-            .attr('markerWidth', 6)
-            .attr('markerHeight', 6)
+            .attr('markerWidth', 8)
+            .attr('markerHeight', 8)
             .attr('orient', 'auto')
             .append('path')
-            .attr('d', 'M0,-5L10,0L0,5')
+            .attr('d', 'M0,-4L10,0L0,4')
             .attr('class', 'edge-arrow incoming');
         
         // Create main group for zoom/pan
@@ -278,6 +312,17 @@ class FlowPlay {
         this.positionOverlay();
         // Reposition incoming caches
         this.positionIncomingCaches();
+        // Update minimap viewport
+        this.updateMiniMapViewport();
+        // Update zoom level indicator
+        this.updateZoomLevel(event.transform.k);
+    }
+    
+    updateZoomLevel(scale) {
+        const zoomLevel = document.getElementById('zoom-level');
+        if (zoomLevel) {
+            zoomLevel.textContent = `${Math.round(scale * 100)}%`;
+        }
     }
     
     renderFlowchart() {
@@ -340,11 +385,33 @@ class FlowPlay {
                 .style('cursor', 'pointer')
                 .on('click', (event) => {
                     event.stopPropagation();
-                    // Navigate to the target node (follow the arrow direction)
-                    this.navigateToNode(edge.target);
+                    // If clicking an edge connected to current node, go to the OTHER node
+                    // Otherwise go to target (follow arrow direction)
+                    if (this.currentNode) {
+                        if (edge.source === this.currentNode.id) {
+                            // Outgoing edge: go to target
+                            this.navigateToNode(edge.target);
+                        } else if (edge.target === this.currentNode.id) {
+                            // Incoming edge: go to source
+                            this.navigateToNode(edge.source);
+                        } else {
+                            // Edge not connected to current: go to target
+                            this.navigateToNode(edge.target);
+                        }
+                    } else {
+                        this.navigateToNode(edge.target);
+                    }
+                })
+                .on('mouseenter', (event) => {
+                    if (edge.label) {
+                        this.showEdgeLabelTooltip(edge, event);
+                    }
+                })
+                .on('mouseleave', () => {
+                    this.hideEdgeLabelTooltip();
                 })
                 .append('title')
-                .text(`Click to go to: ${target.label}`);
+                .text(`Click to navigate`);
             
             // Edge label
             if (edge.label) {
@@ -368,11 +435,26 @@ class FlowPlay {
                 .attr('class', 'node-group')
                 .attr('id', `node-${node.id}`)
                 .attr('transform', `translate(${node.x}, ${node.y})`)
-                .on('click', () => this.navigateToNode(node.id));
-            
-            // Add tooltip on hover
-            g.append('title')
-                .text(`${this.formatNodeType(node.type)}: ${node.label}\nClick to navigate`);
+                .on('click', () => this.navigateToNode(node.id))
+                .on('mouseenter', (event) => {
+                    // Only show preview when not the current node
+                    if (!this.currentNode || node.id !== this.currentNode.id) {
+                        this.showNodePreview(node, event);
+                    }
+                })
+                .on('mousemove', (event) => {
+                    if (this.nodePreviewTooltip && this.nodePreviewTooltip.style.display !== 'none') {
+                        this.nodePreviewTooltip.style.left = `${event.clientX + 15}px`;
+                        this.nodePreviewTooltip.style.top = `${event.clientY + 15}px`;
+                    }
+                })
+                .on('mouseleave', () => {
+                    this.hideNodePreview();
+                })
+                .on('dblclick', () => {
+                    // Double-click to zoom and navigate
+                    this.navigateToNode(node.id);
+                });
             
             // Collapsed node shape (visible when not selected)
             const collapsedGroup = g.append('g').attr('class', 'node-collapsed');
@@ -430,25 +512,87 @@ class FlowPlay {
     calculateEdgePath(source, target) {
         const dx = target.x - source.x;
         const dy = target.y - source.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
+        const angle = Math.atan2(dy, dx);
         
-        // Offset to avoid overlapping with node shapes (increased for larger nodes)
-        const sourceOffset = 60;
-        const targetOffset = 65;
-        
-        const sx = source.x + (dx / dist) * sourceOffset;
-        const sy = source.y + (dy / dist) * sourceOffset;
-        const tx = target.x - (dx / dist) * targetOffset;
-        const ty = target.y - (dy / dist) * targetOffset;
+        // Calculate intersection points with node boundaries
+        const sourcePoint = this.getNodeEdgePoint(source, angle);
+        const targetPoint = this.getNodeEdgePoint(target, angle + Math.PI); // opposite direction
         
         // Curved path
-        const midX = (sx + tx) / 2;
-        const midY = (sy + ty) / 2;
-        const curvature = 0.2;
-        const cx = midX; // - dy * curvature;
-        const cy = midY; // + dx * curvature;
+        const midX = (sourcePoint.x + targetPoint.x) / 2;
+        const midY = (sourcePoint.y + targetPoint.y) / 2;
         
-        return `M${sx},${sy} Q${cx},${cy} ${tx},${ty}`;
+        return `M${sourcePoint.x},${sourcePoint.y} Q${midX},${midY} ${targetPoint.x},${targetPoint.y}`;
+    }
+    
+    /**
+     * Calculate the point on the edge of a node where an edge should connect
+     * Handles different node shapes: rectangle, rounded rect, and diamond
+     */
+    getNodeEdgePoint(node, angle) {
+        const halfWidth = this.nodeWidth / 2;
+        const halfHeight = this.nodeHeight / 2;
+        
+        if (node.type === 'DecisionNode') {
+            // Diamond shape: points at 0, 90, 180, 270 degrees
+            // Diamond extends: left/right by size*2, top/bottom by size
+            const size = 50;
+            const diamondHalfWidth = size * 2;
+            const diamondHalfHeight = size;
+            
+            // Normalize angle to 0-2π
+            let a = angle;
+            while (a < 0) a += 2 * Math.PI;
+            while (a >= 2 * Math.PI) a -= 2 * Math.PI;
+            
+            // Calculate intersection with diamond edges
+            // Diamond vertices: right(2s,0), bottom(0,s), left(-2s,0), top(0,-s)
+            const cos = Math.cos(a);
+            const sin = Math.sin(a);
+            
+            // Parameter t where ray intersects diamond edge
+            let t;
+            if (cos >= 0 && sin >= 0) {
+                // Quadrant 1: edge from right to bottom
+                t = 1 / (cos/diamondHalfWidth + sin/diamondHalfHeight);
+            } else if (cos < 0 && sin >= 0) {
+                // Quadrant 2: edge from bottom to left
+                t = 1 / (-cos/diamondHalfWidth + sin/diamondHalfHeight);
+            } else if (cos < 0 && sin < 0) {
+                // Quadrant 3: edge from left to top
+                t = 1 / (-cos/diamondHalfWidth - sin/diamondHalfHeight);
+            } else {
+                // Quadrant 4: edge from top to right
+                t = 1 / (cos/diamondHalfWidth - sin/diamondHalfHeight);
+            }
+            
+            return {
+                x: node.x + t * cos,
+                y: node.y + t * sin
+            };
+        } else {
+            // Rectangle (with optional rounded corners - treated as rect for edge calculation)
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            
+            // Find intersection with rectangle boundary
+            // Check which edge the ray hits first
+            let tx = Infinity, ty = Infinity;
+            
+            if (cos !== 0) {
+                tx = (cos > 0 ? halfWidth : -halfWidth) / cos;
+            }
+            if (sin !== 0) {
+                ty = (sin > 0 ? halfHeight : -halfHeight) / sin;
+            }
+            
+            const t = Math.min(Math.abs(tx), Math.abs(ty));
+            
+            return {
+                x: node.x + t * cos,
+                y: node.y + t * sin
+            };
+        }
     }
     
     truncateLabel(label, maxLength) {
@@ -461,6 +605,20 @@ class FlowPlay {
         document.getElementById('zoom-in').addEventListener('click', () => this.zoomIn());
         document.getElementById('zoom-out').addEventListener('click', () => this.zoomOut());
         document.getElementById('fit-view').addEventListener('click', () => this.fitToView());
+        
+        // Export button
+        const exportBtn = document.getElementById('export-btn');
+        if (exportBtn) {
+            exportBtn.addEventListener('click', () => this.exportState());
+        }
+        
+        // Zoom level click to reset
+        const zoomLevel = document.getElementById('zoom-level');
+        if (zoomLevel) {
+            zoomLevel.addEventListener('click', () => {
+                this.svg.transition().duration(300).call(this.zoom.scaleTo, 1);
+            });
+        }
         
         // Help panel toggle
         const helpBtn = document.getElementById('help-btn');
@@ -572,8 +730,370 @@ class FlowPlay {
         }
     }
     
+    // =========================================
+    // SEARCH FUNCTIONALITY
+    // =========================================
+    setupSearch() {
+        const searchInput = document.getElementById('node-search');
+        const searchResults = document.getElementById('search-results');
+        if (!searchInput || !searchResults) return;
+        
+        // Keyboard shortcut
+        document.addEventListener('keydown', (e) => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+                e.preventDefault();
+                searchInput.focus();
+                searchInput.select();
+            }
+        });
+        
+        searchInput.addEventListener('input', () => {
+            this.performSearch(searchInput.value);
+        });
+        
+        searchInput.addEventListener('keydown', (e) => {
+            if (e.key === 'ArrowDown') {
+                e.preventDefault();
+                this.searchSelectedIndex = Math.min(this.searchSelectedIndex + 1, this.searchResults.length - 1);
+                this.renderSearchResults();
+            } else if (e.key === 'ArrowUp') {
+                e.preventDefault();
+                this.searchSelectedIndex = Math.max(this.searchSelectedIndex - 1, 0);
+                this.renderSearchResults();
+            } else if (e.key === 'Enter') {
+                e.preventDefault();
+                if (this.searchSelectedIndex >= 0 && this.searchResults[this.searchSelectedIndex]) {
+                    this.navigateToNode(this.searchResults[this.searchSelectedIndex].id);
+                    this.clearSearch();
+                }
+            } else if (e.key === 'Escape') {
+                this.clearSearch();
+                searchInput.blur();
+            }
+        });
+        
+        searchInput.addEventListener('blur', () => {
+            // Delay to allow click on results
+            setTimeout(() => this.clearSearch(), 200);
+        });
+    }
+    
+    performSearch(query) {
+        const searchResults = document.getElementById('search-results');
+        if (!query.trim()) {
+            searchResults.classList.add('hidden');
+            this.searchResults = [];
+            return;
+        }
+        
+        const lowerQuery = query.toLowerCase();
+        this.searchResults = Object.values(this.nodes).filter(node => 
+            node.label.toLowerCase().includes(lowerQuery) ||
+            node.id.toLowerCase().includes(lowerQuery) ||
+            (node.metadata?.description || '').toLowerCase().includes(lowerQuery)
+        ).slice(0, 10);
+        
+        this.searchSelectedIndex = this.searchResults.length > 0 ? 0 : -1;
+        this.renderSearchResults();
+    }
+    
+    renderSearchResults() {
+        const searchResults = document.getElementById('search-results');
+        
+        if (this.searchResults.length === 0) {
+            searchResults.innerHTML = '<div class="search-no-results">No nodes found</div>';
+            searchResults.classList.remove('hidden');
+            return;
+        }
+        
+        searchResults.innerHTML = this.searchResults.map((node, i) => `
+            <div class="search-result-item ${i === this.searchSelectedIndex ? 'selected' : ''}" data-node-id="${node.id}">
+                <div class="node-type-indicator" style="background: var(--node-${node.type === 'StartNode' ? 'start' : node.type === 'EndNode' ? 'end' : node.type === 'DecisionNode' ? 'decision' : 'process'})"></div>
+                <span class="node-name">${this.escapeHtml(node.label)}</span>
+                <span class="node-id">${node.id}</span>
+            </div>
+        `).join('');
+        
+        searchResults.querySelectorAll('.search-result-item').forEach(item => {
+            item.addEventListener('click', () => {
+                this.navigateToNode(item.dataset.nodeId);
+                this.clearSearch();
+            });
+        });
+        
+        searchResults.classList.remove('hidden');
+    }
+    
+    clearSearch() {
+        const searchInput = document.getElementById('node-search');
+        const searchResults = document.getElementById('search-results');
+        if (searchInput) searchInput.value = '';
+        if (searchResults) searchResults.classList.add('hidden');
+        this.searchResults = [];
+        this.searchSelectedIndex = -1;
+    }
+    
+    // =========================================
+    // MINI-MAP
+    // =========================================
+    setupMiniMap() {
+        const miniMap = document.getElementById('mini-map');
+        const canvas = document.getElementById('mini-map-canvas');
+        if (!miniMap || !canvas) return;
+        
+        this.miniMapCanvas = canvas;
+        this.miniMapCtx = canvas.getContext('2d');
+        
+        // Set canvas size
+        canvas.width = 150;
+        canvas.height = 100;
+        
+        // Click to navigate
+        miniMap.addEventListener('click', (e) => {
+            const rect = canvas.getBoundingClientRect();
+            const x = e.clientX - rect.left;
+            const y = e.clientY - rect.top;
+            this.miniMapClick(x, y);
+        });
+        
+        // Initial render
+        setTimeout(() => this.renderMiniMap(), 100);
+    }
+    
+    renderMiniMap() {
+        if (!this.miniMapCtx || !this.flowData) return;
+        
+        const ctx = this.miniMapCtx;
+        const canvas = this.miniMapCanvas;
+        const width = canvas.width;
+        const height = canvas.height;
+        
+        // Clear
+        ctx.clearRect(0, 0, width, height);
+        
+        // Get bounds
+        let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+        this.flowData.nodes.forEach(node => {
+            minX = Math.min(minX, node.x);
+            minY = Math.min(minY, node.y);
+            maxX = Math.max(maxX, node.x);
+            maxY = Math.max(maxY, node.y);
+        });
+        
+        const graphWidth = maxX - minX + this.nodeWidth * 2;
+        const graphHeight = maxY - minY + this.nodeHeight * 2;
+        
+        // Calculate scale to fit
+        const scale = Math.min(width / graphWidth, height / graphHeight) * 0.9;
+        const offsetX = (width - graphWidth * scale) / 2 - minX * scale + this.nodeWidth * scale;
+        const offsetY = (height - graphHeight * scale) / 2 - minY * scale + this.nodeHeight * scale;
+        
+        this.miniMapScale = scale;
+        this.miniMapOffsetX = offsetX;
+        this.miniMapOffsetY = offsetY;
+        
+        // Draw edges
+        ctx.strokeStyle = 'rgba(255, 255, 255, 0.15)';
+        ctx.lineWidth = 0.5;
+        this.flowData.edges.forEach(edge => {
+            const source = this.nodes[edge.source];
+            const target = this.nodes[edge.target];
+            ctx.beginPath();
+            ctx.moveTo(source.x * scale + offsetX, source.y * scale + offsetY);
+            ctx.lineTo(target.x * scale + offsetX, target.y * scale + offsetY);
+            ctx.stroke();
+        });
+        
+        // Draw nodes
+        this.flowData.nodes.forEach(node => {
+            const x = node.x * scale + offsetX;
+            const y = node.y * scale + offsetY;
+            const w = this.nodeWidth * scale * 0.8;
+            const h = this.nodeHeight * scale * 0.8;
+            
+            // Color based on type and state
+            if (this.currentNode && node.id === this.currentNode.id) {
+                ctx.fillStyle = '#5b5fc7';
+            } else if (this.visitedNodes.has(node.id)) {
+                ctx.fillStyle = '#2d9c6f';
+            } else {
+                ctx.fillStyle = 'rgba(255, 255, 255, 0.3)';
+            }
+            
+            ctx.beginPath();
+            ctx.roundRect(x - w/2, y - h/2, w, h, 2);
+            ctx.fill();
+        });
+        
+        // Draw viewport indicator
+        this.updateMiniMapViewport();
+    }
+    
+    updateMiniMapViewport() {
+        const viewport = document.getElementById('mini-map-viewport');
+        if (!viewport || !this.svg) return;
+        
+        const transform = d3.zoomTransform(this.svg.node());
+        const container = document.getElementById('flowchart-container');
+        
+        const viewWidth = container.clientWidth / transform.k;
+        const viewHeight = container.clientHeight / transform.k;
+        const viewX = -transform.x / transform.k;
+        const viewY = -transform.y / transform.k;
+        
+        const scale = this.miniMapScale || 0.1;
+        const offsetX = this.miniMapOffsetX || 0;
+        const offsetY = this.miniMapOffsetY || 0;
+        
+        viewport.style.left = `${viewX * scale + offsetX}px`;
+        viewport.style.top = `${viewY * scale + offsetY}px`;
+        viewport.style.width = `${viewWidth * scale}px`;
+        viewport.style.height = `${viewHeight * scale}px`;
+    }
+    
+    miniMapClick(x, y) {
+        if (!this.miniMapScale) return;
+        
+        const graphX = (x - this.miniMapOffsetX) / this.miniMapScale;
+        const graphY = (y - this.miniMapOffsetY) / this.miniMapScale;
+        
+        // Find closest node
+        let closestNode = null;
+        let closestDist = Infinity;
+        
+        this.flowData.nodes.forEach(node => {
+            const dist = Math.sqrt((node.x - graphX) ** 2 + (node.y - graphY) ** 2);
+            if (dist < closestDist) {
+                closestDist = dist;
+                closestNode = node;
+            }
+        });
+        
+        if (closestNode && closestDist < this.nodeWidth) {
+            this.navigateToNode(closestNode.id);
+        }
+    }
+    
+    // =========================================
+    // NODE PREVIEW TOOLTIP
+    // =========================================
+    setupNodePreview() {
+        // Create tooltip element
+        this.nodePreviewTooltip = document.createElement('div');
+        this.nodePreviewTooltip.className = 'node-preview-tooltip';
+        this.nodePreviewTooltip.style.display = 'none';
+        document.body.appendChild(this.nodePreviewTooltip);
+        
+        // Create edge label tooltip
+        this.edgeLabelTooltip = document.createElement('div');
+        this.edgeLabelTooltip.className = 'edge-label-tooltip';
+        this.edgeLabelTooltip.style.display = 'none';
+        document.body.appendChild(this.edgeLabelTooltip);
+    }
+    
+    showNodePreview(node, event) {
+        const tooltip = this.nodePreviewTooltip;
+        if (!tooltip) return;
+        
+        const description = node.metadata?.description || '';
+        const shortDesc = description.length > 150 ? description.substring(0, 150) + '...' : description;
+        
+        tooltip.innerHTML = `
+            <div class="preview-header">
+                <span class="preview-badge ${node.type}">${this.formatNodeType(node.type)}</span>
+                <span class="preview-title">${this.escapeHtml(node.label)}</span>
+            </div>
+            ${shortDesc ? `<div class="preview-description">${this.escapeHtml(shortDesc)}</div>` : ''}
+            <div class="preview-hint">Click to navigate</div>
+        `;
+        
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${event.clientX + 15}px`;
+        tooltip.style.top = `${event.clientY + 15}px`;
+        
+        // Keep tooltip in viewport
+        const rect = tooltip.getBoundingClientRect();
+        if (rect.right > window.innerWidth) {
+            tooltip.style.left = `${event.clientX - rect.width - 15}px`;
+        }
+        if (rect.bottom > window.innerHeight) {
+            tooltip.style.top = `${event.clientY - rect.height - 15}px`;
+        }
+    }
+    
+    hideNodePreview() {
+        if (this.nodePreviewTooltip) {
+            this.nodePreviewTooltip.style.display = 'none';
+        }
+    }
+    
+    showEdgeLabelTooltip(edge, event) {
+        const tooltip = this.edgeLabelTooltip;
+        if (!tooltip || !edge.label) return;
+        
+        tooltip.textContent = edge.label;
+        tooltip.style.display = 'block';
+        tooltip.style.left = `${event.clientX + 10}px`;
+        tooltip.style.top = `${event.clientY + 10}px`;
+    }
+    
+    hideEdgeLabelTooltip() {
+        if (this.edgeLabelTooltip) {
+            this.edgeLabelTooltip.style.display = 'none';
+        }
+    }
+    
+    // =========================================
+    // AUTO-HIDE CONTROLS
+    // =========================================
+    setupAutoHide() {
+        const controls = document.getElementById('controls');
+        if (!controls) return;
+        
+        const resetAutoHide = () => {
+            this.lastInteractionTime = Date.now();
+            controls.classList.remove('auto-hidden');
+            
+            clearTimeout(this.autoHideTimeout);
+            this.autoHideTimeout = setTimeout(() => {
+                const elapsed = Date.now() - this.lastInteractionTime;
+                if (elapsed >= 5000) {
+                    controls.classList.add('auto-hidden');
+                }
+            }, 5000);
+        };
+        
+        // Reset on any interaction
+        document.addEventListener('mousemove', resetAutoHide);
+        document.addEventListener('keydown', resetAutoHide);
+        document.addEventListener('click', resetAutoHide);
+        
+        // Initial timer
+        resetAutoHide();
+    }
+    
+    // =========================================
+    // PROGRESS TRACKING
+    // =========================================
+    updateProgress() {
+        const progressText = document.getElementById('progress-text');
+        const progressFill = document.getElementById('progress-fill');
+        if (!progressText || !progressFill) return;
+        
+        const total = this.flowData.nodes.length;
+        const visited = this.visitedNodes.size;
+        
+        progressText.textContent = `${visited} / ${total} visited`;
+        progressFill.style.width = `${(visited / total) * 100}%`;
+    }
+    
     start() {
-        // Find start node
+        // Try to restore saved state first
+        if (this.loadState()) {
+            return;
+        }
+        
+        // Otherwise, find start node
         const startNode = this.flowData.nodes.find(n => n.type === 'StartNode');
         if (startNode) {
             this.navigateToNode(startNode.id);
@@ -583,8 +1103,12 @@ class FlowPlay {
     restart() {
         // Clear state
         this.history = [];
+        this.historyIndex = -1;
         this.visitedNodes.clear();
         this.nodeCache.clear();
+        
+        // Clear saved state
+        this.clearSavedState();
         
         // Reset visual state
         this.g.selectAll('.node-group').classed('current', false).classed('visited', false);
@@ -611,6 +1135,9 @@ class FlowPlay {
         // Hide overlay during transition
         document.getElementById('node-overlay').classList.add('hidden');
         
+        // Hide node preview tooltip
+        this.hideNodePreview();
+        
         // Restore visibility of previous node's collapsed shape
         if (this.currentNode) {
             d3.select(`#node-${this.currentNode.id} .node-collapsed`).style('opacity', 1);
@@ -619,7 +1146,13 @@ class FlowPlay {
         }
         
         this.currentNode = node;
+        
+        // Fork history: if we're in the past and make a new move, truncate future
+        if (this.historyIndex < this.history.length - 1) {
+            this.history = this.history.slice(0, this.historyIndex + 1);
+        }
         this.history.push(nodeId);
+        this.historyIndex = this.history.length - 1;
         
         // Update visual state
         d3.select(`#node-${nodeId}`).classed('current', true);
@@ -631,6 +1164,11 @@ class FlowPlay {
         this.updateCurrentNodePanel();
         this.updateIncomingCaches();
         this.updateHistory();
+        this.updateProgress();
+        this.renderMiniMap();
+        
+        // Save state to localStorage
+        this.saveState();
         
         // Zoom to node (overlay shown after zoom completes)
         this.zoomToNode(node);
@@ -769,6 +1307,9 @@ class FlowPlay {
             backBtn.classList.toggle('hidden', this.history.length <= 1);
         }
         
+        // Update breadcrumb
+        this.updateBreadcrumb();
+        
         // Update description
         const descEl = document.getElementById('overlay-description');
         const description = node.metadata?.description || '';
@@ -788,6 +1329,37 @@ class FlowPlay {
         // Bind add cache button (NO - using dynamic empty row now)
         // const addBtn = document.getElementById('overlay-add-cache');
         // if (addBtn) addBtn.onclick = ...; 
+    }
+    
+    updateBreadcrumb() {
+        const container = document.getElementById('overlay-breadcrumb');
+        if (!container) return;
+        
+        // Show last 4 items in breadcrumb
+        const historyUpToCurrent = this.history.slice(0, this.historyIndex + 1);
+        const displayHistory = historyUpToCurrent.slice(-4);
+        const startIndex = Math.max(0, historyUpToCurrent.length - 4);
+        
+        container.innerHTML = displayHistory.map((nodeId, i) => {
+            const n = this.nodes[nodeId];
+            const actualIndex = startIndex + i;
+            const isCurrent = actualIndex === this.historyIndex;
+            
+            let html = '';
+            if (i > 0) {
+                html += '<span class="breadcrumb-separator">›</span>';
+            }
+            html += `<span class="breadcrumb-item ${isCurrent ? 'current' : ''}" data-index="${actualIndex}" title="${this.escapeHtml(n.label)}">${this.truncateLabel(n.label, 10)}</span>`;
+            return html;
+        }).join('');
+        
+        // Add click handlers
+        container.querySelectorAll('.breadcrumb-item:not(.current)').forEach(item => {
+            item.addEventListener('click', () => {
+                const index = parseInt(item.dataset.index);
+                this.timeTravel(index);
+            });
+        });
     }
     
     renderOverlayData() {
@@ -948,17 +1520,19 @@ class FlowPlay {
                 this.navigateToNode(sourceId);
             });
             
-            // Allow text selection without triggering drag
-            // We do this by stopping propagation of mousedown events on the content
-            const content = panel.querySelector('.cache-table');
-            if (content) {
-                content.addEventListener('mousedown', (e) => {
-                    e.stopPropagation();
-                });
+            // Make entire panel draggable (except interactive content)
+            // Stop drag on cache table and interactive elements
+            const cacheTable = panel.querySelector('.cache-table');
+            if (cacheTable) {
+                cacheTable.addEventListener('mousedown', (e) => e.stopPropagation());
+            }
+            const incomingSource = panel.querySelector('.incoming-source');
+            if (incomingSource) {
+                incomingSource.addEventListener('mousedown', (e) => e.stopPropagation());
             }
             
-            // Make panel draggable
-            this.makeDraggable(panel);
+            // Make panel draggable from anywhere else
+            this.makeDraggableFromAnywhere(panel);
             
             container.appendChild(panel);
         });
@@ -1091,22 +1665,40 @@ class FlowPlay {
         });
     }
     
+    /**
+     * Make an element draggable from anywhere on its surface
+     * Used for panels that should be draggable except on interactive content
+     */
+    makeDraggableFromAnywhere(element) {
+        element.addEventListener('mousedown', (e) => {
+            // Don't start drag if clicking on interactive elements
+            if (e.target.closest('button, a, input, textarea, .incoming-source, .cache-table')) {
+                return;
+            }
+            DragManager.startDrag(element, e.clientX, e.clientY);
+            e.preventDefault();
+        });
+    }
+    
     updateHistory() {
         const container = document.getElementById('history-trail');
         container.innerHTML = '';
         
-        let displayHistory = this.history;
+        // Only show history up to current position (for time-travel support)
+        const historyUpToCurrent = this.history.slice(0, this.historyIndex + 1);
+        let displayHistory = historyUpToCurrent;
         let truncated = false;
         
-        if (!this.historyExpanded && this.history.length > 5) {
-            displayHistory = this.history.slice(-5);
+        // Show 4 items instead of 5
+        if (!this.historyExpanded && historyUpToCurrent.length > 4) {
+            displayHistory = historyUpToCurrent.slice(-4);
             truncated = true;
         }
         
         if (truncated) {
              const expandBtn = document.createElement('span');
              expandBtn.className = 'history-expand';
-             expandBtn.textContent = `+${this.history.length - 5} more`;
+             expandBtn.textContent = `+${historyUpToCurrent.length - 4} more`;
              expandBtn.title = "Show full history";
              expandBtn.addEventListener('click', () => {
                  this.historyExpanded = true;
@@ -1118,7 +1710,7 @@ class FlowPlay {
              sep.className = 'history-separator';
              sep.textContent = '→';
              container.appendChild(sep);
-        } else if (this.historyExpanded && this.history.length > 5) {
+        } else if (this.historyExpanded && historyUpToCurrent.length > 4) {
              const collapseBtn = document.createElement('span');
              collapseBtn.className = 'history-expand';
              collapseBtn.textContent = `Show less`;
@@ -1147,8 +1739,9 @@ class FlowPlay {
             const item = document.createElement('span');
             item.className = 'history-item';
             
-            // Check if this is the actual last item of the full history
-            const isLast = (truncated ? index + (this.history.length - 5) : index) === this.history.length - 1;
+            // Calculate actual index in full history
+            const actualIndex = truncated ? index + (historyUpToCurrent.length - 4) : index;
+            const isLast = actualIndex === historyUpToCurrent.length - 1;
             
             if (isLast) {
                 item.classList.add('current');
@@ -1156,10 +1749,11 @@ class FlowPlay {
             item.textContent = this.truncateLabel(node.label, 12);
             item.title = node.label;
             item.dataset.nodeId = nodeId;
+            item.dataset.historyIndex = actualIndex;
             
-            // Make clickable
+            // Make clickable - time travel to that point in history
             item.addEventListener('click', () => {
-                this.navigateToNode(nodeId);
+                this.timeTravel(actualIndex);
             });
             
             container.appendChild(item);
@@ -1176,15 +1770,56 @@ class FlowPlay {
     
     // Navigation helper methods
     goBack() {
-        if (this.history.length > 1) {
-            // Remove current node from history
-            this.history.pop();
-            // Get previous node
-            const prevNodeId = this.history[this.history.length - 1];
-            // Remove it too (navigateToNode will re-add it)
-            this.history.pop();
-            this.navigateToNode(prevNodeId);
+        if (this.historyIndex > 0) {
+            this.timeTravel(this.historyIndex - 1);
         }
+    }
+    
+    /**
+     * Time travel to a specific point in history without truncating
+     * @param {number} index - The history index to travel to
+     */
+    timeTravel(index) {
+        if (index < 0 || index >= this.history.length) return;
+        if (index === this.historyIndex) return;
+        
+        const nodeId = this.history[index];
+        const node = this.nodes[nodeId];
+        if (!node) return;
+        
+        // Reset keyboard edge selection
+        this.selectedEdgeIndex = -1;
+        
+        // Hide overlay during transition
+        document.getElementById('node-overlay').classList.add('hidden');
+        
+        // Restore visibility of previous node's collapsed shape
+        if (this.currentNode) {
+            d3.select(`#node-${this.currentNode.id} .node-collapsed`).style('opacity', 1);
+            d3.select(`#node-${this.currentNode.id}`).classed('current', false).classed('visited', true);
+        }
+        
+        this.currentNode = node;
+        this.historyIndex = index;
+        
+        // Update visual state
+        d3.select(`#node-${nodeId}`).classed('current', true);
+        
+        // Highlight edges
+        this.updateEdgeHighlights();
+        
+        // Update UI
+        this.updateCurrentNodePanel();
+        this.updateIncomingCaches();
+        this.updateHistory();
+        this.updateProgress();
+        this.renderMiniMap();
+        
+        // Save state
+        this.saveState();
+        
+        // Zoom to node
+        this.zoomToNode(node);
     }
     
     closeOverlay() {
@@ -1291,6 +1926,116 @@ class FlowPlay {
         const count = Object.keys(this.globalCache).length;
         const countBadge = count > 0 ? ` <span class="cache-count">(${count})</span>` : '';
         toggle.innerHTML = `Global Data${countBadge}`;
+    }
+    
+    // =========================================
+    // STATE PERSISTENCE (localStorage)
+    // =========================================
+    saveState() {
+        if (!this.flowData) return;
+        
+        const state = {
+            flowName: this.flowData.name,
+            currentNodeId: this.currentNode?.id,
+            history: this.history,
+            historyIndex: this.historyIndex,
+            visitedNodes: Array.from(this.visitedNodes),
+            globalCache: this.globalCache,
+            nodeCache: Object.fromEntries(this.nodeCache)
+        };
+        
+        try {
+            localStorage.setItem(`flowplay_${this.flowData.name}`, JSON.stringify(state));
+        } catch (e) {
+            console.warn('Failed to save state to localStorage:', e);
+        }
+    }
+    
+    loadState() {
+        if (!this.flowData) return false;
+        
+        try {
+            const saved = localStorage.getItem(`flowplay_${this.flowData.name}`);
+            if (!saved) return false;
+            
+            const state = JSON.parse(saved);
+            if (state.flowName !== this.flowData.name) return false;
+            
+            this.history = state.history || [];
+            this.historyIndex = state.historyIndex ?? -1;
+            this.visitedNodes = new Set(state.visitedNodes || []);
+            this.globalCache = state.globalCache || {};
+            this.nodeCache = new Map(Object.entries(state.nodeCache || {}));
+            
+            // Restore visited visual state
+            this.visitedNodes.forEach(nodeId => {
+                d3.select(`#node-${nodeId}`).classed('visited', true);
+            });
+            
+            // Navigate to saved current node
+            if (state.currentNodeId && this.nodes[state.currentNodeId]) {
+                this.currentNode = null; // Prevent adding to history
+                this.navigateToNodeDirect(state.currentNodeId);
+                return true;
+            }
+        } catch (e) {
+            console.warn('Failed to load state from localStorage:', e);
+        }
+        return false;
+    }
+    
+    /**
+     * Navigate without adding to history (for state restoration)
+     */
+    navigateToNodeDirect(nodeId) {
+        const node = this.nodes[nodeId];
+        if (!node) return;
+        
+        this.currentNode = node;
+        
+        // Update visual state
+        d3.select(`#node-${nodeId}`).classed('current', true);
+        
+        this.updateEdgeHighlights();
+        this.updateCurrentNodePanel();
+        this.updateIncomingCaches();
+        this.updateHistory();
+        this.updateProgress();
+        this.renderMiniMap();
+        this.zoomToNode(node);
+    }
+    
+    clearSavedState() {
+        if (this.flowData) {
+            localStorage.removeItem(`flowplay_${this.flowData.name}`);
+        }
+    }
+    
+    // =========================================
+    // EXPORT STATE
+    // =========================================
+    exportState() {
+        const state = {
+            flowName: this.flowData?.name,
+            exportDate: new Date().toISOString(),
+            currentNode: this.currentNode?.id,
+            history: this.history,
+            visitedNodes: Array.from(this.visitedNodes),
+            globalCache: this.globalCache,
+            nodeCache: Object.fromEntries(this.nodeCache)
+        };
+        
+        const json = JSON.stringify(state, null, 2);
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `flowplay-state-${this.flowData?.name || 'export'}-${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
     }
 }
 
