@@ -1,117 +1,292 @@
 <html lang="en">
-<head>
-    <meta charset="UTF-8"/>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>FlowPlay - Interactive Flowchart Visualizer</title>
-    <meta name="description" content="Interactive flowchart visualizer with game-mode navigation and K/V cache system"/>
-    <link rel="stylesheet" href="styles.css"/>
-    <link rel="preconnect" href="https://fonts.googleapis.com"/>
-    <link rel="preconnect" href="https://fonts.gstatic.com"/>
+    <meta
+      name="description"
+      content="Interactive flowchart visualizer with game-mode navigation and K/V cache system"
+    />
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" />
     <!-- <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/> -->
     <script src="https://d3js.org/d3.v7.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/dagre@0.8.5/dist/dagre.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
-</head>
-<body>
+  </head>
+  <body>
     <div id="app">
-        <!-- Main flowchart visualization -->
-        <div id="flowchart-container">
-            <svg id="flowchart-svg"></svg>
-            <!-- Node detail overlay - positioned over current node -->
-            <div id="node-overlay" class="node-overlay hidden">
-                <button id="overlay-close" class="overlay-close-btn" title="Close (Esc)">&times;</button>
-                <button id="overlay-back" class="overlay-back-btn hidden" title="Go back (B)">←</button>
-                <div id="overlay-breadcrumb" class="overlay-breadcrumb"></div>
-                <div class="overlay-header">
-                    <span class="node-badge" id="overlay-badge">NODE</span>
-                    <h3 id="overlay-title">Node Title</h3>
-                </div>
-                <div class="overlay-description" id="overlay-description"></div>
-                <div class="overlay-cache">
-                    <div class="section-header">
-                        <span>Cache</span>
-                        <button id="overlay-add-cache" class="add-cache-btn">+</button>
-                    </div>
-                    <div class="cache-entries" id="overlay-cache-entries"></div>
-                </div>
-                <div class="overlay-actions" id="overlay-actions"></div>
-            </div>
+      <!-- Header Bar -->
+      <header id="header-bar">
+        <div id="header-left">
+          <h1 id="flowchart-name">Loading...</h1>
         </div>
-
-        <!-- Incoming caches container (floating near edges) -->
-        <div id="incoming-caches-container">
-            <!-- Dynamically created cache panels will appear here -->
-        </div>
-
-        <!-- Controls -->
-        <div id="controls" class="glass-panel">
-            <button id="restart-btn" class="btn btn-secondary" title="Restart flow (R)">↺</button>
-            <div class="control-divider"></div>
-            <button id="zoom-out" class="btn btn-secondary" title="Zoom out (-)">−</button>
-            <span id="zoom-level" class="zoom-level" title="Click to reset">100%</span>
-            <button id="zoom-in" class="btn btn-secondary" title="Zoom in (+)">+</button>
-            <button id="fit-view" class="btn btn-secondary" title="Fit to view (F)">⛶</button>
-            <div class="control-divider"></div>
-            <button id="export-btn" class="btn btn-secondary" title="Export session state">⬇</button>
-            <button id="help-btn" class="btn btn-secondary" title="Keyboard shortcuts (?)">?</button>
-        </div>
-        
-        <!-- Search box -->
-        <div id="search-container" class="glass-panel">
-            <input type="text" id="node-search" placeholder="Search nodes... (Ctrl+K)" autocomplete="off" />
+        <div id="header-center">
+          <div id="search-container">
+            <input
+              type="text"
+              id="node-search"
+              placeholder="Search nodes... (Ctrl+K)"
+              autocomplete="off"
+            />
             <div id="search-results" class="hidden"></div>
+          </div>
         </div>
-        
-        <!-- Progress indicator -->
-        <div id="progress-indicator" class="glass-panel">
+        <div id="header-right">
+          <div id="progress-indicator">
             <span id="progress-text">0 / 0 visited</span>
             <div id="progress-bar"><div id="progress-fill"></div></div>
+          </div>
         </div>
-        
-        <!-- Mini-map -->
-        <div id="mini-map" class="glass-panel">
-            <canvas id="mini-map-canvas"></canvas>
-            <div id="mini-map-viewport"></div>
-        </div>
-        
-        <!-- Keyboard shortcuts help -->
-        <div id="shortcuts-panel" class="glass-panel hidden">
-            <div class="shortcuts-header">Keyboard Shortcuts</div>
-            <div class="shortcuts-list">
-                <div class="shortcut"><kbd>Ctrl+K</kbd> Search nodes</div>
-                <div class="shortcut"><kbd>1-9</kbd> Select edge option</div>
-                <div class="shortcut"><kbd>↑↓</kbd> Navigate edges</div>
-                <div class="shortcut"><kbd>Enter</kbd> Activate selected</div>
-                <div class="shortcut"><kbd>B</kbd> Go back</div>
-                <div class="shortcut"><kbd>Esc</kbd> Close overlay</div>
-                <div class="shortcut"><kbd>R</kbd> Restart</div>
-                <div class="shortcut"><kbd>F</kbd> Fit to view</div>
-                <div class="shortcut"><kbd>+/-</kbd> Zoom</div>
-                <div class="shortcut"><kbd>?</kbd> Toggle this help</div>
-            </div>
-        </div>
-        
-        <!-- Global Cache UI -->
-        <button id="global-cache-toggle">Global Data</button>
-        <div id="global-cache-panel" class="hidden glass-panel">
-            <div class="section-header">Global Data Store</div>
-            <div id="global-cache-entries" class="panel-content">
-                <!-- Populated by JS -->
-            </div>
-        </div>
+      </header>
 
-        <!-- Flow title -->
-        <div id="flow-title" class="glass-panel">
-            <h1 id="flowchart-name">Loading...</h1>
+      <!-- Main flowchart visualization -->
+      <div id="flowchart-container">
+        <svg id="flowchart-svg"></svg>
+        <!-- Node detail overlay - positioned over current node -->
+        <div id="node-overlay" class="node-overlay hidden">
+          <div class="overlay-header">
+            <span class="node-badge" id="overlay-badge">NODE</span>
+            <h3 id="overlay-title">Node Title</h3>
+          </div>
+          <div class="overlay-description" id="overlay-description"></div>
+          <div class="overlay-cache">
+            <div class="section-header">
+              <span>Cache</span>
+              <button id="overlay-add-cache" class="add-cache-btn">+</button>
+            </div>
+            <div class="cache-entries" id="overlay-cache-entries"></div>
+          </div>
+          <div class="overlay-actions" id="overlay-actions"></div>
         </div>
+      </div>
 
-        <!-- History trail -->
-        <div id="history-panel" class="glass-panel">
-            <div id="history-trail"></div>
+      <!-- Controls -->
+      <div id="controls" class="glass-panel">
+        <button
+          id="restart-btn"
+          class="btn btn-secondary"
+          title="Restart flow (R)"
+        >
+          ↺
+        </button>
+        <div class="control-divider"></div>
+        <button id="zoom-out" class="btn btn-secondary" title="Zoom out (-)">
+          −
+        </button>
+        <span id="zoom-level" class="zoom-level" title="Click to reset"
+          >100%</span
+        >
+        <button id="zoom-in" class="btn btn-secondary" title="Zoom in (+)">
+          +
+        </button>
+        <button
+          id="zoom-to-node"
+          class="btn btn-secondary"
+          title="Zoom to current node (Z)"
+        >
+          ⊙
+        </button>
+        <button id="fit-view" class="btn btn-secondary" title="Fit all (F)">
+          ⛶
+        </button>
+        <div class="control-divider"></div>
+        <button
+          id="export-btn"
+          class="btn btn-secondary"
+          title="Export session state"
+        >
+          ⬇
+        </button>
+        <button id="settings-btn" class="btn btn-secondary" title="Settings">
+          ⚙
+        </button>
+        <button
+          id="help-btn"
+          class="btn btn-secondary"
+          title="Keyboard shortcuts (?)"
+        >
+          ?
+        </button>
+      </div>
+
+      <!-- Settings Modal -->
+      <div id="settings-overlay" class="modal-overlay hidden">
+        <div id="settings-panel" class="settings-modal">
+          <div class="settings-header">
+            <span>Settings</span>
+            <button id="settings-close" class="modal-close-btn">&times;</button>
+          </div>
+          <div class="settings-content">
+            <div class="settings-section">
+              <div class="settings-section-title">Display</div>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="showMiniMap"
+                  checked
+                />
+                <span>Show Mini-map</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="showProgressIndicator"
+                  checked
+                />
+                <span>Show Progress Indicator</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="showNodePreview"
+                  checked
+                />
+                <span>Node Preview on Hover</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="showBreadcrumbs"
+                  checked
+                />
+                <span>Show Breadcrumbs</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="showEdgeLabels"
+                  checked
+                />
+                <span>Show Edge Labels</span>
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Appearance</div>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="darkMode"
+                  checked
+                />
+                <span>Dark Mode</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="animatedEdges"
+                  checked
+                />
+                <span>Animated Edges</span>
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Behavior</div>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="autoHideControls"
+                  checked
+                />
+                <span>Auto-hide Controls</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="autoSaveState"
+                  checked
+                />
+                <span>Auto-save Progress</span>
+              </label>
+              <label class="setting-item">
+                <input
+                  type="checkbox"
+                  class="setting-toggle"
+                  data-setting="confirmNavigation"
+                />
+                <span>Confirm Before Navigation</span>
+              </label>
+            </div>
+            <div class="settings-section">
+              <div class="settings-section-title">Zoom</div>
+              <div class="setting-item-row">
+                <span>Default Zoom Level</span>
+                <input
+                  type="number"
+                  id="default-zoom-input"
+                  class="setting-number-input"
+                  min="0.5"
+                  max="3"
+                  step="0.1"
+                  value="1.6"
+                />
+              </div>
+            </div>
+          </div>
         </div>
+      </div>
+
+      <!-- Mini-map -->
+      <div id="mini-map" class="glass-panel">
+        <canvas id="mini-map-canvas"></canvas>
+        <div id="mini-map-viewport"></div>
+      </div>
+
+      <!-- Keyboard shortcuts help -->
+      <div id="shortcuts-panel" class="glass-panel hidden">
+        <div class="shortcuts-header">Keyboard Shortcuts</div>
+        <div class="shortcuts-list">
+          <div class="shortcut"><kbd>Ctrl+K</kbd> Search nodes</div>
+          <div class="shortcut"><kbd>1-9</kbd> Select edge / history item</div>
+          <div class="shortcut"><kbd>↑↓</kbd> Navigate edges / history</div>
+          <div class="shortcut"><kbd>Enter</kbd> Activate selected</div>
+          <div class="shortcut"><kbd>B</kbd> Go back</div>
+          <div class="shortcut"><kbd>Z</kbd> Zoom to current node</div>
+          <div class="shortcut"><kbd>Esc</kbd> Zoom out / close panel</div>
+          <div class="shortcut"><kbd>H</kbd> Toggle history panel</div>
+          <div class="shortcut"><kbd>R</kbd> Restart</div>
+          <div class="shortcut"><kbd>F</kbd> Fit all</div>
+          <div class="shortcut"><kbd>+/-</kbd> Zoom</div>
+          <div class="shortcut"><kbd>?</kbd> Toggle this help</div>
+        </div>
+      </div>
+
+      <!-- Global Cache UI -->
+      <button id="global-cache-toggle">Global Data</button>
+      <div id="global-cache-panel" class="hidden glass-panel">
+        <div class="section-header">Global Data Store</div>
+        <div id="global-cache-entries" class="panel-content">
+          <!-- Populated by JS -->
+        </div>
+      </div>
+
+      <!-- History Toggle Button -->
+      <button id="history-toggle" class="glass-panel" title="History (H)">
+        🕒 History
+      </button>
+
+      <!-- History Panel (right side) -->
+      <div id="history-panel" class="glass-panel hidden">
+        <div class="history-panel-header">
+          <span>History</span>
+          <button id="history-panel-close" class="panel-close-btn">
+            &times;
+          </button>
+        </div>
+        <div id="history-list"></div>
+      </div>
     </div>
 
     <script src="app.js"></script>
-</body>
+  </body>
 </html>
-

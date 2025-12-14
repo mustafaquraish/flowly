@@ -27,10 +27,41 @@
 20. ✅ **Loading indicator** - Show spinner while flowchart data is loading
 21. ✅ **Auto-hide controls** - Controls fade after 5 seconds of inactivity
 
+## Batch 2 - User-Requested Improvements (Dec 14)
+
+22. ✅ **Wider edge click area** - Invisible wider hit area for edges (20px stroke) for easier clicking
+23. ✅ **Edge hover shows connected node** - Hovering over edges from current node shows preview of the connected node
+24. ✅ **Global settings menu** - Settings panel to toggle features (mini-map, incoming panels, progress, etc.)
+25. ✅ **Text selection in incoming panels** - Cache table text is now selectable without triggering drag
+26. ✅ **History preserves future** - Time-traveling back keeps future history visible; only truncates on different path
+27. ✅ **Re-zoom on current node** - Clicking current node while zoomed out re-zooms to it
+
+## Batch 3 - User-Requested Improvements (Dec 14)
+
+28. ✅ **Back button in history panel** - Moved back button from overlay to history panel for better visibility
+29. ✅ **History shows max 4 items** - History panel shows 4 visible items with +N buttons for both past and future
+30. ✅ **First edge auto-selected** - When navigating to a node, first edge is automatically selected so Enter works immediately
+31. ✅ **Combined edge tooltip** - Edge label and node preview combined into single tooltip on hover
+32. ✅ **All edges show preview** - Any edge (not just current node's edges) shows target node preview on hover
+33. ✅ **Expanded node arrow positioning** - Arrow endpoints recalculated based on expanded overlay size, not collapsed node
+
+## Batch 2 - Additional Improvements (10)
+
+34. ⬜ **Keyboard focus trap in overlay** - Tab key cycles through interactive elements within overlay
+35. ⬜ **Highlight path to current node** - Option to highlight all edges from start to current node
+36. ⬜ **Node statistics panel** - Show stats about visited nodes, cache entries, path length
+37. ⬜ **Undo/Redo navigation** - Ctrl+Z to go back, Ctrl+Shift+Z to go forward in history
+38. ⬜ **Copy node info to clipboard** - Button to copy node title/description/cache as text
+39. ⬜ **Fullscreen mode** - Toggle fullscreen for distraction-free navigation
+40. ⬜ **Keyboard-only navigation mode** - Full keyboard control without mouse needed
+41. ⬜ **Theme toggle** - Switch between dark/light mode
+42. ⬜ **Zoom to fit selection** - When multiple nodes selected, fit them all in view
+43. ⬜ **Edge label search** - Include edge labels in search results
+
 ## Summary
 
-- **17 improvements completed** ✅
-- **4 improvements pending** ⬜
+- **29 improvements completed** ✅
+- **10 improvements pending** ⬜
 
 ### Completed Features:
 - Mini-map with click navigation
@@ -49,6 +80,18 @@
 - Edge clicking for navigation
 - Arrow positioning fixes
 - Draggable panels
+- Wider edge click areas
+- Edge hover shows connected node preview
+- Global settings panel
+- Text selection in cache panels
+- History preserves future items
+- Re-zoom on current node click
+- Back button in history panel
+- History 4-item limit with +N
+- First edge auto-selected
+- Combined tooltip for edges
+- All edges show node preview
+- Expanded node arrow recalculation
 
 ### Keyboard Shortcuts:
 - `Ctrl+K` - Search nodes
