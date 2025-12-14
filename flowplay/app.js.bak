@@ -3,138 +3,6 @@
  * Main Application Logic
  */
 
-/**
- * Singleton DragManager - handles document-level drag listeners
- * to avoid accumulating listeners per draggable element
- */
-const DragManager = {
-    activeElement: null,
-    startX: 0,
-    startY: 0,
-    initialLeft: 0,
-    initialTop: 0,
-    
-    init() {
-        document.addEventListener('mousemove', (e) => {
-            if (!this.activeElement) return;
-            
-            const dx = e.clientX - this.startX;
-            const dy = e.clientY - this.startY;
-            
-            this.activeElement.style.left = `${this.initialLeft + dx}px`;
-            this.activeElement.style.top = `${this.initialTop + dy}px`;
-        });
-        
-        document.addEventListener('mouseup', () => {
-            if (this.activeElement) {
-                this.activeElement.classList.remove('dragging');
-                this.activeElement = null;
-            }
-        });
-    },
-    
-    startDrag(element, clientX, clientY) {
-        this.activeElement = element;
-        this.startX = clientX;
-        this.startY = clientY;
-        this.initialLeft = element.offsetLeft;
-        this.initialTop = element.offsetTop;
-        element.classList.add('dragging');
-    }
-};
-
-// Initialize DragManager once
-DragManager.init();
-
-/**
- * Unified cache editor helper functions.
- * These handle the edit/delete logic for both node cache and global cache.
- */
-const CacheEditorHelpers = {
-    /**
-     * Generates HTML rows for a cache editor
-     * @param {Object} cache - The cache object (key-value pairs)
-     * @param {string} placeholderPrefix - Prefix for placeholder text (e.g., 'Add key...' or 'Add global key...')
-     * @param {Function} escapeHtml - HTML escaping function
-     * @returns {string} HTML string
-     */
-    generateRows(cache, placeholderPrefix, escapeHtml) {
-        let entries = Object.entries(cache);
-        entries = entries.filter(([k, v]) => k.trim() !== '' || v.trim() !== '');
-        entries.push(['', '']);
-        
-        return entries.map(([key, value], index) => {
-            const isEmpty = key === '' && value === '';
-            const isLast = index === entries.length - 1;
-            const placeholderKey = isLast ? placeholderPrefix : 'Key';
-            
-            return `
-            <div class="cache-row ${isEmpty ? 'empty-row' : ''}">
-                <textarea class="cache-key" placeholder="${placeholderKey}" data-field="key" data-original-key="${escapeHtml(key)}">${escapeHtml(key)}</textarea>
-                <textarea class="cache-value" placeholder="Value" data-field="value" data-key="${escapeHtml(key)}">${escapeHtml(value)}</textarea>
-                <button class="delete-cache-btn" data-key="${escapeHtml(key)}" style="${isEmpty ? 'visibility:hidden' : ''}">×</button>
-            </div>
-        `}).join('');
-    },
-    
-    /**
-     * Handles edit events for a cache editor (key rename, value change, new entry)
-     * @param {Event} event - The input event
-     * @param {Object} cache - The cache object to modify
-     * @param {string} keyPrefix - Prefix for auto-generated keys (e.g., 'key_' or 'global_')
-     * @returns {boolean} Whether a re-render is needed (new entry was created)
-     */
-    handleEdit(event, cache, keyPrefix) {
-        const input = event.target;
-        const row = input.closest('.cache-row');
-        const keyInput = row.querySelector('.cache-key');
-        const valInput = row.querySelector('.cache-value');
-        
-        const originalKey = keyInput.dataset.originalKey;
-        const currentKey = keyInput.value;
-        const currentValue = valInput.value;
-        
-        if (originalKey) {
-            // Modification of existing entry
-            if (currentKey !== originalKey) {
-                // Key change: remove old, set new
-                const val = cache[originalKey];
-                delete cache[originalKey];
-                if (currentKey) cache[currentKey] = val;
-                keyInput.dataset.originalKey = currentKey;
-                valInput.dataset.key = currentKey;
-                row.querySelector('.delete-cache-btn').dataset.key = currentKey;
-            }
-            // Value change
-            if (currentKey && cache.hasOwnProperty(currentKey)) {
-                cache[currentKey] = currentValue;
-            }
-            return false; // No re-render needed
-        } else {
-            // New entry creation (filling empty row)
-            if (currentKey || currentValue) {
-                const safeKey = currentKey || `${keyPrefix}${Date.now()}`;
-                cache[safeKey] = currentValue;
-                return true; // Re-render needed to add new empty row
-            }
-            return false;
-        }
-    },
-    
-    /**
-     * Handles delete events for a cache editor
-     * @param {Event} event - The click event
-     * @param {Object} cache - The cache object to modify
-     * @returns {boolean} Whether a re-render is needed
-     */
-    handleDelete(event, cache) {
-        const key = event.target.dataset.key;
-        if (!key) return false;
-        delete cache[key];
-        return true;
-    }
-};
-
 class FlowPlay {
     constructor() {
         // Flow data
@@ -147,18 +15,20 @@ class FlowPlay {
         this.currentNode = null;
         this.history = [];
         this.visitedNodes = new Set();
-        this.historyExpanded = false;
         
         // K/V Cache per node
         this.nodeCache = new Map();
-        this.globalCache = {};
         
         // D3 elements
         this.svg = null;
+        this.history = [];
+        this.historyExpanded = false;
+        this.globalCache = {};
         
         // Configuration
         this.nodeWidth = 160;
         this.nodeHeight = 70;
+        this.simulation = null;
         
         // Bind methods
         this.handleZoom = this.handleZoom.bind(this);
@@ -178,26 +48,24 @@ class FlowPlay {
     }
     
     async loadFlowData() {
-        let errorMessage = 'Failed to load flowchart';
         try {
             const response = await fetch('./complex_flow.json');
             if (!response.ok) {
-                errorMessage = `Failed to load flowchart: ${response.statusText}`;
-                this.flowData = typeof bundledFlowData !== 'undefined' ? bundledFlowData : null;
+                this.flowData = bundledFlowData;
                 if (!this.flowData) {
-                    throw new Error(errorMessage);
+                    throw new Error(`Failed to load flowchart: ${response.statusText}`);
                 } else {
-                    console.log('Using bundled json data!');
+                    console.log(`Using bundled json data!!`)
                 }
             } else {
                 this.flowData = await response.json();
             }
-        } catch (e) {
-            this.flowData = typeof bundledFlowData !== 'undefined' ? bundledFlowData : null;
+        } catch {
+            this.flowData = bundledFlowData;
             if (!this.flowData) {
-                throw new Error(errorMessage);
+                throw new Error(`Failed to load flowchart: ${response.statusText}`);
             } else {
-                console.log('Using bundled json data!');
+                console.log(`Using bundled json data!!`)
             }
         }
         
@@ -696,14 +564,43 @@ class FlowPlay {
     
     renderOverlayData() {
         const container = document.getElementById('overlay-cache-entries');
-        const headerSpan = document.querySelector('.overlay-cache .section-header span');
-        if (headerSpan) headerSpan.textContent = 'Data';
+        const header = document.querySelector('.overlay-cache .section-header');
+        if (header) header.textContent = 'Data';
         
         const cache = this.nodeCache.get(this.currentNode.id) || {};
-        container.innerHTML = CacheEditorHelpers.generateRows(cache, 'Add key...', this.escapeHtml.bind(this));
         
-        // Use event delegation - attach once to container instead of per-element
-        this.setupCacheEditorDelegation(container, 'node');
+        // Convert to array
+        let entries = Object.entries(cache);
+        
+        // Always ensure one empty row at the end
+        // Prune extra empty rows if any (where key and value are both empty), except the last one
+        entries = entries.filter(([k, v]) => k.trim() !== '' || v.trim() !== '');
+        entries.push(['', '']); 
+        
+        container.innerHTML = entries.map(([key, value], index) => {
+            const isEmpty = key === '' && value === '';
+            const isLast = index === entries.length - 1;
+            const placeholderKey = isLast ? 'Add key...' : 'Key';
+            
+            return `
+            <div class="cache-row ${isEmpty ? 'empty-row' : ''}">
+                <textarea class="cache-key" placeholder="${placeholderKey}" data-field="key" data-original-key="${this.escapeHtml(key)}">${this.escapeHtml(key)}</textarea>
+                <textarea class="cache-value" placeholder="Value" data-field="value" data-key="${this.escapeHtml(key)}">${this.escapeHtml(value)}</textarea>
+                <button class="delete-cache-btn" data-key="${this.escapeHtml(key)}" style="${isEmpty ? 'visibility:hidden' : ''}">×</button>
+            </div>
+        `}).join('');
+        
+        // Bind events
+        container.querySelectorAll('.cache-key, .cache-value').forEach(textarea => {
+            textarea.addEventListener('input', (e) => this.handleDataEdit(e));
+        });
+        
+        container.querySelectorAll('.delete-cache-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.handleDataDelete(e);
+            });
+        });
     }
     
     renderOverlayActions() {
@@ -751,71 +648,106 @@ class FlowPlay {
         return div.innerHTML;
     }
     
-    /**
-     * Sets up event delegation for cache editors (handles both node and global cache)
-     * @param {HTMLElement} container - The container element for cache rows
-     * @param {string} cacheType - 'node' or 'global'
-     */
-    setupCacheEditorDelegation(container, cacheType) {
-        // Remove any existing listeners by cloning (event delegation means we set once)
-        const newContainer = container.cloneNode(true);
-        container.parentNode.replaceChild(newContainer, container);
+    handleDataEdit(event) {
+        const input = event.target;
+        // Find row inputs
+        const row = input.closest('.cache-row');
+        const keyInput = row.querySelector('.cache-key');
+        const valInput = row.querySelector('.cache-value');
         
-        // Input event delegation
-        newContainer.addEventListener('input', (e) => {
-            if (e.target.classList.contains('cache-key') || e.target.classList.contains('cache-value')) {
-                const cache = cacheType === 'node' 
-                    ? this.nodeCache.get(this.currentNode.id) || {}
-                    : this.globalCache;
-                const keyPrefix = cacheType === 'node' ? 'key_' : 'global_';
-                
-                const needsRerender = CacheEditorHelpers.handleEdit(e, cache, keyPrefix);
-                
-                if (cacheType === 'node') {
-                    this.nodeCache.set(this.currentNode.id, cache);
-                }
-                
-                if (needsRerender) {
-                    const input = e.target;
-                    const renderFn = cacheType === 'node' ? 'renderOverlayData' : 'renderGlobalCache';
-                    this[renderFn]();
-                    
-                    // Focus restoration after re-render
-                    const containerSelector = cacheType === 'node' ? '#overlay-cache-entries' : '#global-cache-entries';
-                    const updatedContainer = document.querySelector(containerSelector);
-                    const newRows = updatedContainer.querySelectorAll('.cache-row');
-                    const targetRow = newRows[newRows.length - 2];
-                    if (targetRow) {
-                        const selector = input.classList.contains('cache-key') ? '.cache-key' : '.cache-value';
-                        const toFocus = targetRow.querySelector(selector);
-                        if (toFocus) {
-                            toFocus.focus();
-                            const len = toFocus.value.length;
-                            toFocus.setSelectionRange(len, len);
-                        }
-                    }
-                }
-            }
-        });
+        const originalKey = keyInput.dataset.originalKey;
+        const currentKey = keyInput.value;
+        const currentValue = valInput.value;
         
-        // Click event delegation for delete buttons
-        newContainer.addEventListener('click', (e) => {
-            if (e.target.classList.contains('delete-cache-btn')) {
-                e.stopPropagation();
-                const cache = cacheType === 'node'
-                    ? this.nodeCache.get(this.currentNode.id) || {}
-                    : this.globalCache;
-                
-                if (CacheEditorHelpers.handleDelete(e, cache)) {
-                    if (cacheType === 'node') {
-                        this.nodeCache.set(this.currentNode.id, cache);
-                        this.renderOverlayData();
-                    } else {
-                        this.renderGlobalCache();
-                    }
-                }
+        const cache = this.nodeCache.get(this.currentNode.id) || {};
+        
+        // Logic:
+        // 1. If modifying an existing key (originalKey exists and is not empty):
+        //    - rename property if key changed
+        //    - update value if value changed
+        // 2. If this was the empty row (originalKey is empty):
+        //    - Add new entry to cache
+        //    - Trigger re-render to add new empty row
+        
+        if (originalKey) {
+            // Modification of existing entry
+            if (currentKey !== originalKey) {
+                // Key change: remove old, set new
+                const val = cache[originalKey];
+                delete cache[originalKey];
+                // Only set new if key not empty
+                if (currentKey) cache[currentKey] = val; // keep old value
+                keyInput.dataset.originalKey = currentKey;
+                valInput.dataset.key = currentKey;
+                row.querySelector('.delete-cache-btn').dataset.key = currentKey;
             }
-        });
+            // Value change
+            if (currentKey && cache.hasOwnProperty(currentKey)) {
+                cache[currentKey] = currentValue;
+            }
+            this.nodeCache.set(this.currentNode.id, cache);
+            
+            // If user cleared the key of an existing row, we might need re-render to handle state
+            // mostly handled by delete button, but let's be safe
+        } else {
+            // New entry creation (filling empty row)
+            if (currentKey || currentValue) {
+                // Determine a safe key if empty
+                const safeKey = currentKey || `key_${Date.now()}`;
+                cache[safeKey] = currentValue;
+                this.nodeCache.set(this.currentNode.id, cache);
+                
+                // We must re-render to establish this as a real row and add a new empty one
+                // But we want to keep focus. 
+                // Simple approach: re-render, then restore focus (tricky).
+                // Better: Just set the data attributes and manually append a new row if needed?
+                // Re-rendering is safest for consistency.
+                this.renderOverlayData();
+                
+                // Restore focus? (Complex, skipping optimization for now unless requested)
+                // Actually, let's just let it be "live" editing of the cache object
+                // and only re-render if we need to add the NEW empty row.
+                // We just converted the empty row to a real row.
+                // So we need to add a new empty row at the bottom.
+                
+                // Let's implement full re-render for simplicity 
+                // But finding the element to focus is important
+                // We'll skip focus restoration for this step to keep it simple, checking if it annoys user
+            }
+        }
+        
+        // Auto-refresh logic:
+        // Ideally we only re-render if the state structure changes (count of rows)
+        // If we just edited values, we don't need re-render.
+        // If we filled the empty row, we DO need re-render to add a new empty row.
+        
+        const wasEmptyRow = !originalKey;
+        if (wasEmptyRow && (currentKey || currentValue)) {
+             this.renderOverlayData();
+             // Try to focus the same input in the now non-empty row (index = length - 2)
+             const newRows = document.querySelectorAll('.cache-row');
+             const targetRow = newRows[newRows.length - 2]; 
+             if (targetRow) {
+                 const selector = input.classList.contains('cache-key') ? '.cache-key' : '.cache-value';
+                 const toFocus = targetRow.querySelector(selector);
+                 if (toFocus) {
+                     toFocus.focus();
+                     // move cursor to end
+                     const len = toFocus.value.length;
+                     toFocus.setSelectionRange(len, len);
+                 }
+             }
+        }
+    }
+    
+    handleDataDelete(event) {
+        const key = event.target.dataset.key;
+        if (!key) return; // ignore delete on empty row
+        
+        const cache = this.nodeCache.get(this.currentNode.id) || {};
+        delete cache[key];
+        this.nodeCache.set(this.currentNode.id, cache);
+        this.renderOverlayData();
     }
 
     
@@ -966,6 +898,43 @@ class FlowPlay {
         });
     }
 
+    makeDraggable(element) {
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+        
+        const dragHandle = element.querySelector('.drag-handle');
+        
+        // Only allow dragging from the specific handle or header
+        if (!dragHandle) return;
+        
+        dragHandle.addEventListener('mousedown', (e) => {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialLeft = element.offsetLeft;
+            initialTop = element.offsetTop;
+            element.classList.add('dragging');
+            e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            element.style.left = `${initialLeft + dx}px`;
+            element.style.top = `${initialTop + dy}px`;
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                element.classList.remove('dragging');
+            }
+        });
+    }
+    
     renderReadOnlyCache(cache) {
         const entries = Object.entries(cache);
         if (entries.length === 0) {
@@ -985,12 +954,36 @@ class FlowPlay {
     }
     
     makeDraggable(element) {
+        let isDragging = false;
+        let startX, startY, initialLeft, initialTop;
+        
         const dragHandle = element.querySelector('.drag-handle') || element;
         
         dragHandle.addEventListener('mousedown', (e) => {
-            // Use singleton drag manager state
-            DragManager.startDrag(element, e.clientX, e.clientY);
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            initialLeft = element.offsetLeft;
+            initialTop = element.offsetTop;
+            element.classList.add('dragging');
             e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+            if (!isDragging) return;
+            
+            const dx = e.clientX - startX;
+            const dy = e.clientY - startY;
+            
+            element.style.left = `${initialLeft + dx}px`;
+            element.style.top = `${initialTop + dy}px`;
+        });
+        
+        document.addEventListener('mouseup', () => {
+            if (isDragging) {
+                isDragging = false;
+                element.classList.remove('dragging');
+            }
         });
     }
     
@@ -1115,11 +1108,94 @@ class FlowPlay {
         const container = document.getElementById('global-cache-entries');
         if (!container) return;
         
-        // Use shared helper to generate rows (reuse same structure as node cache)
-        container.innerHTML = CacheEditorHelpers.generateRows(this.globalCache, 'Add global key...', this.escapeHtml.bind(this));
+        // Convert to array
+        let entries = Object.entries(this.globalCache);
         
-        // Use event delegation - same as node cache
-        this.setupCacheEditorDelegation(container, 'global');
+        // Always ensure one empty row at the end
+        entries = entries.filter(([k, v]) => k.trim() !== '' || v.trim() !== '');
+        entries.push(['', '']); 
+        
+        container.innerHTML = entries.map(([key, value], index) => {
+            const isEmpty = key === '' && value === '';
+            const isLast = index === entries.length - 1;
+            const placeholderKey = isLast ? 'Add global key...' : 'Key';
+            
+            return `
+            <table class="cache-table" style="margin-bottom:0">
+            <tr class="cache-row ${isEmpty ? 'empty-row' : ''}">
+                <td style="width: 35%;">
+                    <textarea class="cache-key" placeholder="${placeholderKey}" data-field="key" data-original-key="${this.escapeHtml(key)}">${this.escapeHtml(key)}</textarea>
+                </td>
+                <td>
+                    <textarea class="cache-value" placeholder="Value" data-field="value" data-key="${this.escapeHtml(key)}">${this.escapeHtml(value)}</textarea>
+                </td>
+                <td style="width: 20px;">
+                    <button class="delete-cache-btn" data-key="${this.escapeHtml(key)}" style="${isEmpty ? 'visibility:hidden' : ''}">×</button>
+                </td>
+            </tr>
+            </table>
+        `}).join('');
+        
+        // Bind events
+        container.querySelectorAll('.cache-key, .cache-value').forEach(textarea => {
+            textarea.addEventListener('input', (e) => this.handleGlobalDataEdit(e));
+        });
+        
+        container.querySelectorAll('.delete-cache-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.handleGlobalDataDelete(e);
+            });
+        });
+    }
+
+    handleGlobalDataEdit(event) {
+        const input = event.target;
+        // Find row inputs
+        const row = input.closest('tr');
+        const keyInput = row.querySelector('.cache-key');
+        const valInput = row.querySelector('.cache-value');
+        
+        const originalKey = keyInput.dataset.originalKey;
+        const currentKey = keyInput.value;
+        const currentValue = valInput.value;
+        
+        const cache = this.globalCache;
+        
+        if (originalKey) {
+            // Modification of existing entry
+            if (currentKey !== originalKey) {
+                const val = cache[originalKey];
+                delete cache[originalKey];
+                if (currentKey) cache[currentKey] = val;
+                keyInput.dataset.originalKey = currentKey;
+                valInput.dataset.key = currentKey;
+                const delBtn = row.querySelector('.delete-cache-btn');
+                if (delBtn) delBtn.dataset.key = currentKey;
+            }
+            if (currentKey && cache.hasOwnProperty(currentKey)) {
+                cache[currentKey] = currentValue;
+            }
+        } else {
+            // New entry creation
+            if (currentKey || currentValue) {
+                const safeKey = currentKey || `global_${Date.now()}`;
+                cache[safeKey] = currentValue;
+                this.renderGlobalCache();
+            }
+        }
+        
+        const wasEmptyRow = !originalKey;
+        if (wasEmptyRow && (currentKey || currentValue)) {
+             this.renderGlobalCache();
+        }
+    }
+    
+    handleGlobalDataDelete(event) {
+        const key = event.target.dataset.key;
+        if (!key) return;
+        delete this.globalCache[key];
+        this.renderGlobalCache();
     }
 }
 

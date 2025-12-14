@@ -23,3 +23,6 @@ htmlcov/
 .vscode/
 .idea/
 *.swp
+
+# etc
+bundler
