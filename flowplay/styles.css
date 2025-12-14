@@ -135,32 +135,111 @@ body {
     position: absolute;
     bottom: var(--spacing-lg);
     left: var(--spacing-lg);
-    padding: var(--spacing-xs);
+    padding: 6px;
     display: flex;
-    gap: var(--spacing-md);
+    gap: 4px;
     z-index: 100;
+    background: var(--glass-bg);
+    backdrop-filter: blur(12px);
+    border: 1px solid var(--glass-border);
+    border-radius: var(--radius-md);
 }
 
-/* Buttons */
+#controls .btn {
+    padding: 8px 12px;
+    background: transparent;
+    border: none;
+}
+
+#controls .btn:hover {
+    background: var(--bg-tertiary);
+}
+
+#controls .btn.active {
+    background: var(--accent-primary);
+    color: white;
+}
+
+#controls .btn-secondary {
+    border: none;
+}
+
+.control-divider {
+    width: 1px;
+    height: 20px;
+    background: var(--glass-border);
+    margin: 0 2px;
+}
+
+/* Keyboard Shortcuts Panel */
+#shortcuts-panel {
+    position: absolute;
+    bottom: 70px;
+    left: var(--spacing-lg);
+    padding: 12px 16px;
+    z-index: 100;
+    min-width: 200px;
+}
+
+#shortcuts-panel.hidden {
+    display: none;
+}
+
+.shortcuts-header {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--glass-border);
+}
+
+.shortcuts-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.shortcut {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.shortcut kbd {
+    display: inline-block;
+    padding: 2px 6px;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--glass-border);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    min-width: 28px;
+    text-align: center;
+}
+
+/* Buttons - Base styles */
 .btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: var(--spacing-xs);
+    gap: var(--spacing-sm);
     padding: 8px 14px;
-    font-size: 0.9rem;
+    font-size: 0.8rem;
+    font-family: var(--font-family);
+    font-weight: 500;
     border: none;
     border-radius: var(--radius-sm);
-    font-family: var(--font-family);
-    font-size: 0.75rem;
-    font-weight: 500;
     cursor: pointer;
     transition: all var(--transition-fast);
+    white-space: nowrap;
 }
 
 .btn-small {
-    padding: var(--spacing-xs) var(--spacing-sm);
-    font-size: 0.7rem;
+    padding: 5px 10px;
+    font-size: 0.75rem;
 }
 
 .btn-primary {
@@ -186,8 +265,8 @@ body {
 .btn-edge {
     background: var(--bg-tertiary);
     color: var(--text-primary);
-    padding: var(--spacing-sm) var(--spacing-md);
-    font-size: 0.75rem;
+    padding: 10px 12px;
+    font-size: 0.8rem;
     border-radius: var(--radius-sm);
     width: 100%;
     text-align: left;
@@ -198,6 +277,7 @@ body {
 .btn-edge:hover {
     background: var(--accent-primary);
     border-color: var(--accent-primary);
+    transform: translateX(2px);
 }
 
 .btn-edge .edge-arrow {
@@ -211,21 +291,27 @@ body {
     font-size: 0.65rem;
 }
 
+.btn-icon {
+    padding: 8px;
+    min-width: 36px;
+    min-height: 36px;
+}
+
 .btn-tiny {
-    padding: 2px 6px;
-    font-size: 0.6rem;
-    min-width: 20px;
+    padding: 4px 8px;
+    font-size: 0.7rem;
+    min-width: 24px;
 }
 
 /* Node Overlay - Appears as expanded node */
 .node-overlay {
     position: absolute;
-    width: 360px;
+    width: 400px;
     /* Removed max-height to allow full expansion */
     z-index: 300;
     pointer-events: auto;
     border-radius: 12px;
-    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.5);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.6);
     animation: overlayAppear 0.15s ease;
     display: flex;
     flex-direction: column;
@@ -274,13 +360,67 @@ body {
 
 /* Overlay Header */
 .overlay-header {
-    padding: 10px 14px;
+    padding: 14px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     flex-shrink: 0;
 }
 
+.overlay-close-btn {
+    position: absolute;
+    top: 8px;
+    right: 10px;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    border-radius: 50%;
+    font-size: 18px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.overlay-close-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+}
+
+.overlay-back-btn {
+    position: absolute;
+    top: 8px;
+    left: 10px;
+    width: 28px;
+    height: 28px;
+    border: none;
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-secondary);
+    border-radius: 50%;
+    font-size: 16px;
+    line-height: 1;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 10;
+}
+
+.overlay-back-btn:hover {
+    background: rgba(255, 255, 255, 0.2);
+    color: var(--text-primary);
+}
+
+.overlay-back-btn.hidden {
+    display: none;
+}
+
 .overlay-header h3 {
-    font-size: 14px;
+    font-size: 15px;
     font-weight: 600;
     color: #fff;
     margin: 0;
@@ -290,13 +430,13 @@ body {
 /* Node Badge */
 .node-badge {
     display: inline-block;
-    padding: 2px 6px;
-    border-radius: 3px;
-    font-size: 9px;
+    padding: 3px 8px;
+    border-radius: 4px;
+    font-size: 10px;
     font-weight: 600;
     text-transform: uppercase;
     letter-spacing: 0.04em;
-    margin-bottom: 4px;
+    margin-bottom: 6px;
 }
 
 .node-badge.StartNode {
@@ -323,14 +463,14 @@ body {
 
 /* Overlay Description - Markdown with proper scrolling */
 .overlay-description {
-    padding: 12px 14px;
+    padding: 14px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     /* Removed max-height to avoid clipping / nested scrollbars unless necessary */
     overflow-y: visible;
     flex-shrink: 0;
-    font-size: 11px;
-    line-height: 1.5;
-    color: #a0a0a8;
+    font-size: 12px;
+    line-height: 1.6;
+    color: #b0b0b8;
 }
 
 .overlay-description::-webkit-scrollbar {
@@ -404,7 +544,7 @@ body {
 
 /* Overlay Cache Section */
 .overlay-cache {
-    padding: 10px 14px;
+    padding: 14px 16px;
     border-bottom: 1px solid rgba(255, 255, 255, 0.08);
     flex-shrink: 0;
 }
@@ -441,10 +581,10 @@ body {
 
 /* Overlay Actions */
 .overlay-actions {
-    padding: 10px 14px;
+    padding: 14px 16px;
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     flex-shrink: 0;
 }
 
@@ -623,8 +763,8 @@ body {
 /* Incoming Cache Panels */
 .incoming-cache-panel {
     position: absolute;
-    width: 260px;
-    padding: 14px;
+    width: 300px;
+    padding: 16px;
     z-index: 150;
     animation: fadeIn 0.15s ease;
     user-select: text;
@@ -634,8 +774,8 @@ body {
     /* 98% opaque basically solid but slight tint */
     backdrop-filter: blur(12px);
     transition: box-shadow 0.2s;
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
-    border-radius: 6px;
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+    border-radius: var(--radius-md);
 }
 
 /* Source Type-Based Tints - Opaque to match Overlay */
@@ -660,22 +800,43 @@ body {
 }
 
 .incoming-cache-panel .incoming-source {
-    font-size: 0.85rem;
-    font-weight: 700;
-    margin-bottom: 10px;
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 12px;
     color: var(--text-primary);
     display: flex;
     align-items: center;
-    gap: 8px;
+    gap: 10px;
     cursor: pointer;
-    padding-bottom: 8px;
+    padding: 8px 10px;
+    margin: -8px -10px 12px -10px;
+    border-radius: var(--radius-sm);
     border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+    transition: background var(--transition-fast);
+}
+
+.incoming-cache-panel .incoming-source:hover {
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.incoming-cache-panel .incoming-source::after {
+    content: '→ Go to node';
+    margin-left: auto;
+    font-size: 0.7rem;
+    font-weight: 400;
+    color: var(--text-muted);
+    opacity: 0;
+    transition: opacity var(--transition-fast);
+}
+
+.incoming-cache-panel .incoming-source:hover::after {
+    opacity: 1;
 }
 
 .incoming-cache-panel .incoming-source .arrow {
     color: var(--accent-primary);
-    font-size: 1.2em;
-    font-weight: 800;
+    font-size: 1.1em;
+    font-weight: 700;
 }
 
 /* Incoming Cache Table Styles */
@@ -727,15 +888,26 @@ body {
 /* Drag Handle */
 .drag-handle {
     position: absolute;
-    top: 6px;
-    right: 8px;
+    top: 8px;
+    right: 10px;
     color: var(--text-muted);
     cursor: grab;
-    padding: 4px;
-    font-size: 0.8rem;
-    opacity: 0.4;
+    padding: 4px 6px;
+    font-size: 0.9rem;
+    opacity: 0.3;
     transition: opacity var(--transition-fast);
     letter-spacing: -2px;
+    background: rgba(255, 255, 255, 0.05);
+    border-radius: 4px;
+}
+
+.incoming-cache-panel:hover .drag-handle {
+    opacity: 0.7;
+}
+
+.drag-handle:hover {
+    opacity: 1 !important;
+    background: rgba(255, 255, 255, 0.1);
 }
 
 /* Fix links in markdown */
@@ -821,32 +993,50 @@ body {
 #history-panel {
     position: absolute;
     bottom: var(--spacing-lg);
-    right: var(--spacing-lg);
-    padding: var(--spacing-sm) var(--spacing-md);
-    max-width: 400px;
+    left: 50%;
+    transform: translateX(-50%);
+    padding: 10px 20px;
+    max-width: 70%;
     z-index: 100;
+    display: flex;
+    align-items: center;
 }
 
 /* History Trail */
 #history-trail {
-    position: absolute;
-    top: var(--spacing-lg);
-    left: 50%;
-    transform: translateX(-50%);
-    padding: 8px 16px;
-    z-index: 100;
     display: flex;
     align-items: center;
     gap: 8px;
-    font-size: 0.95rem;
-    /* Increased size */
+    font-size: 0.85rem;
+    flex-wrap: wrap;
+    justify-content: center;
 }
 
 .history-item {
-    color: var(--text-muted);
+    color: var(--text-secondary);
     cursor: pointer;
-    transition: color var(--transition-fast);
+    transition: all var(--transition-fast);
     font-weight: 500;
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+.history-item:hover {
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.history-item.current {
+    color: var(--accent-secondary);
+    background: var(--accent-primary-glow);
+    font-weight: 600;
+}
+
+.history-separator {
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    user-select: none;
 }
 
 /* ... existing styles ... */
@@ -857,36 +1047,49 @@ body {
     top: var(--spacing-lg);
     right: var(--spacing-lg);
     z-index: 200;
-    font-size: 0.9rem;
-    padding: 8px 12px;
+    font-size: 0.85rem;
+    font-weight: 500;
+    padding: 10px 16px;
     background: var(--glass-bg);
     border: 1px solid var(--glass-border);
     backdrop-filter: blur(12px);
-    border-radius: var(--radius-sm);
-    color: var(--text-secondary);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
     cursor: pointer;
     transition: all var(--transition-fast);
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
-#global-cache-toggle:hover,
+#global-cache-toggle:hover {
+    background: var(--bg-tertiary);
+    border-color: var(--accent-primary);
+}
+
 #global-cache-toggle.active {
     background: var(--accent-primary);
     color: white;
     border-color: var(--accent-primary);
 }
 
+#global-cache-toggle .cache-count {
+    font-weight: 400;
+    opacity: 0.8;
+}
+
 /* Global Data Panel */
 #global-cache-panel {
     position: absolute;
     top: 60px;
-    /* Below toggle */
     right: var(--spacing-lg);
-    width: 300px;
+    width: 380px;
+    max-height: 60vh;
     background: var(--glass-bg);
     backdrop-filter: blur(16px);
     border: 1px solid var(--glass-border);
     border-radius: var(--radius-md);
-    box-shadow: 0 4px 20px var(--glass-shadow);
+    box-shadow: 0 8px 32px var(--glass-shadow);
     z-index: 190;
     display: flex;
     flex-direction: column;
@@ -901,10 +1104,17 @@ body {
 
 #global-cache-panel .section-header {
     background: rgba(0, 0, 0, 0.2);
-    padding: 10px 14px;
+    padding: 12px 16px;
     margin: 0;
     border-bottom: 1px solid var(--glass-border);
     color: var(--text-primary);
+    font-size: 0.85rem;
+}
+
+#global-cache-panel .panel-content {
+    padding: var(--spacing-md);
+    overflow-y: auto;
+    max-height: calc(60vh - 50px);
 }
 
 /* Global Data Panel - Continued */
@@ -920,25 +1130,31 @@ body {
 .history-expand {
     color: var(--accent-secondary);
     cursor: pointer;
-    font-size: 0.85rem;
-    padding: 2px 6px;
-    background: rgba(124, 127, 212, 0.1);
-    border-radius: 4px;
+    font-size: 0.8rem;
+    font-weight: 500;
+    padding: 4px 10px;
+    background: rgba(124, 127, 212, 0.15);
+    border-radius: var(--radius-sm);
     transition: all var(--transition-fast);
 }
 
 .history-expand:hover {
-    background: rgba(124, 127, 212, 0.2);
+    background: rgba(124, 127, 212, 0.25);
     color: var(--text-primary);
 }
 
 /* SVG Node Styles */
 .node-group {
     cursor: pointer;
+    transition: filter var(--transition-fast);
 }
 
 .node-group:hover .node-shape {
-    filter: brightness(1.15);
+    filter: brightness(1.2) drop-shadow(0 0 8px currentColor);
+}
+
+.node-group:hover .node-label {
+    filter: brightness(1.1);
 }
 
 /* Collapsed Node Shape */
@@ -1051,15 +1267,15 @@ body {
 .edge-btn {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 8px;
     width: 100%;
-    padding: 8px 10px;
+    padding: 10px 14px;
     background: rgba(255, 255, 255, 0.05);
     border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 6px;
+    border-radius: var(--radius-sm);
     color: #e0e0e6;
     font-family: inherit;
-    font-size: 10px;
+    font-size: 12px;
     font-weight: 500;
     cursor: pointer;
     transition: all 0.15s;
@@ -1069,23 +1285,53 @@ body {
 .edge-btn:hover {
     background: #5b5fc7;
     border-color: #5b5fc7;
+    transform: translateX(3px);
+}
+
+.edge-btn.keyboard-selected {
+    background: #5b5fc7;
+    border-color: #5b5fc7;
+    outline: 2px solid rgba(124, 127, 212, 0.5);
+    outline-offset: 2px;
 }
 
 .edge-btn .arrow {
-    opacity: 0.5;
+    opacity: 0.6;
+    font-size: 1.1em;
+}
+
+.edge-btn .shortcut-hint {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    margin-right: 4px;
+    opacity: 0.7;
+}
+
+.edge-btn:hover .shortcut-hint {
+    background: rgba(255, 255, 255, 0.25);
+    opacity: 1;
 }
 
 .edge-btn .target {
     margin-left: auto;
     opacity: 0.5;
-    font-size: 9px;
+    font-size: 10px;
 }
 
 .flow-complete {
     text-align: center;
-    padding: 8px;
-    color: #5a5a66;
-    font-size: 10px;
+    padding: 12px;
+    color: var(--text-secondary);
+    font-size: 12px;
+    background: rgba(255, 255, 255, 0.03);
+    border-radius: var(--radius-sm);
 }
 
 /* Edge Styles */
@@ -1094,18 +1340,32 @@ body {
     stroke: var(--edge-color);
     stroke-width: 1.5;
     transition: all var(--transition-fast);
+    cursor: pointer;
+}
+
+.edge-path:hover {
+    stroke: var(--accent-secondary);
+    stroke-width: 2.5;
 }
 
 .edge-path.incoming {
     stroke: var(--accent-secondary);
-    stroke-width: 2;
+    stroke-width: 2.5;
+}
+
+.edge-path.incoming:hover {
+    stroke-width: 3.5;
 }
 
 .edge-path.outgoing {
     stroke: var(--accent-primary);
-    stroke-width: 1.5;
+    stroke-width: 2;
     stroke-dasharray: 6 3;
     animation: dashFlow 0.8s linear infinite;
+}
+
+.edge-path.outgoing:hover {
+    stroke-width: 3;
 }
 
 @keyframes dashFlow {

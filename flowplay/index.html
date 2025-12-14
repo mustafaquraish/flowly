@@ -19,6 +19,8 @@
             <svg id="flowchart-svg"></svg>
             <!-- Node detail overlay - positioned over current node -->
             <div id="node-overlay" class="node-overlay hidden">
+                <button id="overlay-close" class="overlay-close-btn" title="Close (Esc)">&times;</button>
+                <button id="overlay-back" class="overlay-back-btn hidden" title="Go back (B)">←</button>
                 <div class="overlay-header">
                     <span class="node-badge" id="overlay-badge">NODE</span>
                     <h3 id="overlay-title">Node Title</h3>
@@ -41,11 +43,29 @@
         </div>
 
         <!-- Controls -->
-        <div id="controls">
-            <button id="restart-btn" class="btn btn-secondary">↺ Restart</button>
-            <button id="zoom-in" class="btn btn-secondary">+</button>
-            <button id="zoom-out" class="btn btn-secondary">-</button>
-            <button id="fit-view" class="btn btn-secondary">⛶</button>
+        <div id="controls" class="glass-panel">
+            <button id="restart-btn" class="btn btn-secondary" title="Restart flow (R)">↺</button>
+            <div class="control-divider"></div>
+            <button id="zoom-out" class="btn btn-secondary" title="Zoom out (-)">−</button>
+            <button id="zoom-in" class="btn btn-secondary" title="Zoom in (+)">+</button>
+            <button id="fit-view" class="btn btn-secondary" title="Fit to view (F)">⛶</button>
+            <div class="control-divider"></div>
+            <button id="help-btn" class="btn btn-secondary" title="Keyboard shortcuts">?</button>
+        </div>
+        
+        <!-- Keyboard shortcuts help -->
+        <div id="shortcuts-panel" class="glass-panel hidden">
+            <div class="shortcuts-header">Keyboard Shortcuts</div>
+            <div class="shortcuts-list">
+                <div class="shortcut"><kbd>1-9</kbd> Select edge option</div>
+                <div class="shortcut"><kbd>↑↓</kbd> Navigate edges</div>
+                <div class="shortcut"><kbd>Enter</kbd> Activate selected</div>
+                <div class="shortcut"><kbd>B</kbd> Go back</div>
+                <div class="shortcut"><kbd>Esc</kbd> Close overlay</div>
+                <div class="shortcut"><kbd>R</kbd> Restart</div>
+                <div class="shortcut"><kbd>F</kbd> Fit to view</div>
+                <div class="shortcut"><kbd>+/-</kbd> Zoom</div>
+            </div>
         </div>
         
         <!-- Global Cache UI -->

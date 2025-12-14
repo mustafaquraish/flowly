@@ -170,6 +170,7 @@ class FlowPlay {
             this.setupSVG();
             this.renderFlowchart();
             this.setupControls();
+            this.setupOverlayControls();
             this.start();
         } catch (error) {
             console.error('Failed to initialize FlowPlay:', error);
@@ -322,7 +323,7 @@ class FlowPlay {
         // Draw edges
         const edgeGroup = this.g.append('g').attr('class', 'edges');
         
-        // Draw edges using the positioned nodes
+        // Draw edges using the positioned nodes - make them clickable
         this.flowData.edges.forEach(edge => {
             const source = this.nodes[edge.source];
             const target = this.nodes[edge.target];
@@ -335,7 +336,15 @@ class FlowPlay {
                 .attr('id', `edge-${edge.id}`)
                 .attr('d', path)
                 .attr('marker-end', 'url(#arrow)')
-                .datum(edge);
+                .datum(edge)
+                .style('cursor', 'pointer')
+                .on('click', (event) => {
+                    event.stopPropagation();
+                    // Navigate to the target node (follow the arrow direction)
+                    this.navigateToNode(edge.target);
+                })
+                .append('title')
+                .text(`Click to go to: ${target.label}`);
             
             // Edge label
             if (edge.label) {
@@ -360,6 +369,10 @@ class FlowPlay {
                 .attr('id', `node-${node.id}`)
                 .attr('transform', `translate(${node.x}, ${node.y})`)
                 .on('click', () => this.navigateToNode(node.id));
+            
+            // Add tooltip on hover
+            g.append('title')
+                .text(`${this.formatNodeType(node.type)}: ${node.label}\nClick to navigate`);
             
             // Collapsed node shape (visible when not selected)
             const collapsedGroup = g.append('g').attr('class', 'node-collapsed');
@@ -449,8 +462,19 @@ class FlowPlay {
         document.getElementById('zoom-out').addEventListener('click', () => this.zoomOut());
         document.getElementById('fit-view').addEventListener('click', () => this.fitToView());
         
-        // Key bindings
+        // Help panel toggle
+        const helpBtn = document.getElementById('help-btn');
+        const shortcutsPanel = document.getElementById('shortcuts-panel');
+        if (helpBtn && shortcutsPanel) {
+            helpBtn.addEventListener('click', () => {
+                shortcutsPanel.classList.toggle('hidden');
+                helpBtn.classList.toggle('active');
+            });
+        }
+        
+        // Key bindings - extended for better navigation
         document.addEventListener('keydown', (e) => {
+            // Don't capture when typing in inputs
             if (e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT') return;
             
             switch(e.key) {
@@ -459,10 +483,73 @@ class FlowPlay {
                 case '+': this.zoomIn(); break;
                 case '-': this.zoomOut(); break;
                 case 'f': this.fitToView(); break;
+                
+                // Navigation shortcuts
+                case 'Escape':
+                    // Close overlay and fit to view
+                    this.closeOverlay();
+                    break;
+                case 'Backspace':
+                case 'b':
+                    // Go back to previous node
+                    e.preventDefault();
+                    this.goBack();
+                    break;
+                    
+                // Number keys 1-9 for selecting edges
+                case '1': case '2': case '3': case '4': case '5':
+                case '6': case '7': case '8': case '9':
+                    this.selectEdgeByNumber(parseInt(e.key));
+                    break;
+                    
+                // Arrow keys for edge selection  
+                case 'ArrowDown':
+                case 'ArrowRight':
+                    e.preventDefault();
+                    this.selectNextEdge();
+                    break;
+                case 'ArrowUp':
+                case 'ArrowLeft':
+                    e.preventDefault();
+                    this.selectPrevEdge();
+                    break;
+                case 'Enter':
+                    this.activateSelectedEdge();
+                    break;
+                case '?':
+                    // Toggle help panel
+                    const shortcutsPanel = document.getElementById('shortcuts-panel');
+                    const helpBtn = document.getElementById('help-btn');
+                    if (shortcutsPanel) {
+                        shortcutsPanel.classList.toggle('hidden');
+                        helpBtn?.classList.toggle('active');
+                    }
+                    break;
             }
         });
         
+        // Track currently highlighted edge for keyboard nav
+        this.selectedEdgeIndex = -1;
+        
         this.setupGlobalCache();
+    }
+    
+    setupOverlayControls() {
+        const closeBtn = document.getElementById('overlay-close');
+        if (closeBtn) {
+            closeBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.closeOverlay();
+            });
+        }
+        
+        const backBtn = document.getElementById('overlay-back');
+        if (backBtn) {
+            backBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                this.goBack();
+            });
+        }
     }
     
     setupGlobalCache() {
@@ -517,6 +604,9 @@ class FlowPlay {
     navigateToNode(nodeId) {
         const node = this.nodes[nodeId];
         if (!node) return;
+        
+        // Reset keyboard edge selection
+        this.selectedEdgeIndex = -1;
         
         // Hide overlay during transition
         document.getElementById('node-overlay').classList.add('hidden');
@@ -673,6 +763,12 @@ class FlowPlay {
         // Update overlay type class for styling
         overlay.className = `node-overlay ${node.type}`;
         
+        // Show/hide back button based on history
+        const backBtn = document.getElementById('overlay-back');
+        if (backBtn) {
+            backBtn.classList.toggle('hidden', this.history.length <= 1);
+        }
+        
         // Update description
         const descEl = document.getElementById('overlay-description');
         const description = node.metadata?.description || '';
@@ -722,7 +818,7 @@ class FlowPlay {
             return;
         }
         
-        outgoingEdgeIds.forEach(edgeId => {
+        outgoingEdgeIds.forEach((edgeId, index) => {
             const edge = this.edges[edgeId];
             const targetNode = this.nodes[edge.target];
             
@@ -730,7 +826,8 @@ class FlowPlay {
             btn.className = 'edge-btn';
             
             const label = edge.label || 'Continue';
-            btn.innerHTML = `<span class="arrow">→</span>${label}<span class="target">${this.truncateLabel(targetNode.label, 20)}</span>`;
+            const shortcutHint = index < 9 ? `<span class="shortcut-hint">${index + 1}</span>` : '';
+            btn.innerHTML = `${shortcutHint}<span class="arrow">→</span>${label}<span class="target">${this.truncateLabel(targetNode.label, 20)}</span>`;
             
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
@@ -1077,6 +1174,68 @@ class FlowPlay {
         this.svg.transition().duration(300).call(this.zoom.scaleBy, 0.7);
     }
     
+    // Navigation helper methods
+    goBack() {
+        if (this.history.length > 1) {
+            // Remove current node from history
+            this.history.pop();
+            // Get previous node
+            const prevNodeId = this.history[this.history.length - 1];
+            // Remove it too (navigateToNode will re-add it)
+            this.history.pop();
+            this.navigateToNode(prevNodeId);
+        }
+    }
+    
+    closeOverlay() {
+        const overlay = document.getElementById('node-overlay');
+        overlay.classList.add('hidden');
+        // Restore the current node's collapsed shape
+        if (this.currentNode) {
+            d3.select(`#node-${this.currentNode.id} .node-collapsed`).style('opacity', 1);
+        }
+        this.fitToView();
+    }
+    
+    selectEdgeByNumber(num) {
+        const outgoingEdgeIds = this.graph.outgoingEdges[this.currentNode?.id] || [];
+        if (num <= outgoingEdgeIds.length) {
+            const edgeId = outgoingEdgeIds[num - 1];
+            const edge = this.edges[edgeId];
+            this.navigateToNode(edge.target);
+        }
+    }
+    
+    selectNextEdge() {
+        const buttons = document.querySelectorAll('#overlay-actions .edge-btn');
+        if (buttons.length === 0) return;
+        
+        this.selectedEdgeIndex = Math.min(this.selectedEdgeIndex + 1, buttons.length - 1);
+        this.highlightEdgeButton(buttons);
+    }
+    
+    selectPrevEdge() {
+        const buttons = document.querySelectorAll('#overlay-actions .edge-btn');
+        if (buttons.length === 0) return;
+        
+        if (this.selectedEdgeIndex < 0) this.selectedEdgeIndex = 0;
+        this.selectedEdgeIndex = Math.max(this.selectedEdgeIndex - 1, 0);
+        this.highlightEdgeButton(buttons);
+    }
+    
+    highlightEdgeButton(buttons) {
+        buttons.forEach((btn, i) => {
+            btn.classList.toggle('keyboard-selected', i === this.selectedEdgeIndex);
+        });
+    }
+    
+    activateSelectedEdge() {
+        const buttons = document.querySelectorAll('#overlay-actions .edge-btn');
+        if (this.selectedEdgeIndex >= 0 && this.selectedEdgeIndex < buttons.length) {
+            buttons[this.selectedEdgeIndex].click();
+        }
+    }
+    
     fitToView() {
         const container = document.getElementById('flowchart-container');
         const width = container.clientWidth;
@@ -1120,6 +1279,18 @@ class FlowPlay {
         
         // Use event delegation - same as node cache
         this.setupCacheEditorDelegation(container, 'global');
+        
+        // Update toggle button to show count
+        this.updateGlobalCacheToggle();
+    }
+    
+    updateGlobalCacheToggle() {
+        const toggle = document.getElementById('global-cache-toggle');
+        if (!toggle) return;
+        
+        const count = Object.keys(this.globalCache).length;
+        const countBadge = count > 0 ? ` <span class="cache-count">(${count})</span>` : '';
+        toggle.innerHTML = `Global Data${countBadge}`;
     }
 }
 
