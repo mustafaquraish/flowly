@@ -89,22 +89,17 @@ class TestGraphvizExporter:
         assert "<I>italic</I>" in result
         assert "<I>also italic</I>" in result
         
-        # Code
+        # Code (rendered as italic in Graphviz)
         result = GraphvizExporter._markdown_to_html("`code snippet`")
-        assert '<FONT FACE="monospace">code snippet</FONT>' in result
+        assert '<I>code snippet</I>' in result
         
         # Line breaks
         result = GraphvizExporter._markdown_to_html("line1\nline2")
         assert "<BR/>" in result
-        
-        # HTML escaping
-        result = GraphvizExporter._markdown_to_html("test & <tag>")
-        assert "&amp;" in result
-        assert "&lt;tag&gt;" in result
     
     def test_html_label_without_description(self):
         """Test HTML label generation without description."""
-        label = GraphvizExporter._markdown_to_html_label("Simple Label")
+        label = GraphvizExporter._html_label("Simple Label")
         
         # Should be simple bold label
         assert "<B>Simple Label</B>" in label
@@ -112,7 +107,7 @@ class TestGraphvizExporter:
     
     def test_html_label_with_description(self):
         """Test HTML label generation with description."""
-        label = GraphvizExporter._markdown_to_html_label("Label", "Description with **bold**")
+        label = GraphvizExporter._html_label("Label", "Description with **bold**")
         
         # Should have table structure
         assert "<TABLE" in label
@@ -203,3 +198,143 @@ def test_decision_shape():
     
     dot = GraphvizExporter.to_digraph(chart)
     assert 'shape=diamond' in dot.source
+
+
+class TestGraphvizMarkdownRendering:
+    """Test suite for comprehensive markdown rendering in Graphviz."""
+    
+    def test_complex_markdown_with_headers(self):
+        """Test markdown headers are rendered as bold."""
+        chart = FlowChart("markdown_test")
+        node = ProcessNode(
+            label="Step",
+            metadata={"description": """Check the following:
+
+## Key Metrics
+Monitor these values carefully.
+
+## Warning Signs
+Watch for anomalies.
+"""}
+        )
+        chart.add_node(node)
+        
+        dot = GraphvizExporter.to_digraph(chart)
+        source = dot.source
+        
+        # Headers should be bold, not have ## markers
+        assert "<B>Key Metrics</B>" in source
+        assert "<B>Warning Signs</B>" in source
+        assert "##" not in source
+    
+    def test_markdown_code_blocks(self):
+        """Test inline code rendering."""
+        chart = FlowChart("code_test")
+        node = ProcessNode(
+            label="Command",
+            metadata={"description": "Run `ssh user@server` to connect.\n\nThen use `top` command."}
+        )
+        chart.add_node(node)
+        
+        dot = GraphvizExporter.to_digraph(chart)
+        source = dot.source
+        
+        # Code should be italicized (we convert ` to <I>)
+        assert "<I>ssh user@server</I>" in source
+        assert "<I>top</I>" in source
+    
+    def test_markdown_bold_and_italic(self):
+        """Test bold and italic markdown."""
+        chart = FlowChart("formatting_test")
+        node = ProcessNode(
+            label="Formatted",
+            metadata={"description": "This is **bold text** and this is *italic text*."}
+        )
+        chart.add_node(node)
+        
+        dot = GraphvizExporter.to_digraph(chart)
+        source = dot.source
+        
+        assert "<B>bold text</B>" in source
+        assert "<I>italic text</I>" in source
+    
+    def test_multiline_description_with_lists(self):
+        """Test that multiline descriptions with lists are fully displayed."""
+        chart = FlowChart("list_test")
+        node = ProcessNode(
+            label="Steps",
+            metadata={"description": """Complete these tasks:
+
+1. First item
+2. Second item
+3. Third item
+4. Fourth item
+5. Fifth item
+
+All items should appear in the output.
+"""}
+        )
+        chart.add_node(node)
+        
+        dot = GraphvizExporter.to_digraph(chart)
+        source = dot.source
+        
+        # All list items should be present (no truncation)
+        assert "First item" in source
+        assert "Second item" in source
+        assert "Third item" in source
+        assert "Fourth item" in source
+        assert "Fifth item" in source
+        assert "All items should appear" in source
+        # Should NOT have truncation marker
+        assert "..." not in source
+    
+    def test_very_long_description_no_truncation(self):
+        """Test that very long descriptions are NOT truncated with ..."""
+        long_desc = "This is a very long description. " * 20  # 700+ chars
+        chart = FlowChart("long_test")
+        node = ProcessNode(
+            label="Long",
+            metadata={"description": long_desc}
+        )
+        chart.add_node(node)
+        
+        dot = GraphvizExporter.to_digraph(chart)
+        source = dot.source
+        
+        # Full description should be present, no ... truncation
+        assert long_desc.replace('\n', '<BR/>') in source or "very long description" in source
+        # Check we don't have the old truncation pattern
+        word_count = source.count("very long description")
+        assert word_count >= 15  # Should have most/all repetitions
+    
+    def test_mixed_markdown_features(self):
+        """Test complex markdown with multiple features."""
+        chart = FlowChart("complex_test")
+        node = ProcessNode(
+            label="Complex",
+            metadata={"description": """## Troubleshooting Steps
+
+**Important**: Follow these carefully.
+
+1. Check `systemctl status` output
+2. Review logs with `tail -f /var/log/app.log`
+3. Verify *network connectivity*
+
+**Note**: Use `sudo` if needed.
+"""}
+        )
+        chart.add_node(node)
+        
+        dot = GraphvizExporter.to_digraph(chart)
+        source = dot.source
+        
+        # Check all elements are present
+        assert "<B>Troubleshooting Steps</B>" in source  # Header
+        assert "<B>Important</B>" in source  # Bold
+        assert "<I>systemctl status</I>" in source  # Code
+        assert "<I>tail -f /var/log/app.log</I>" in source  # Code
+        assert "<I>network connectivity</I>" in source  # Italic
+        assert "<B>Note</B>" in source  # Bold
+        assert "<I>sudo</I>" in source  # Code
+

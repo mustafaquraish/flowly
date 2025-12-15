@@ -87,7 +87,7 @@ def export_flowchart(
     safe_name = "".join(c for c in safe_name if c.isalnum() or c == "_")
     
     output_file = output_path / f"{safe_name}{ext}"
-    output_file.write_text(content)
+    output_file.write_text(content, encoding="utf-8")
     
     return output_file
 

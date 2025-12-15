@@ -29,11 +29,15 @@ class MermaidExporter:
         Note: Full markdown rendering is limited in node labels, but descriptions
         can use line breaks and basic formatting.
         """
+        import re
+        
+        # Remove markdown headers (## Header -> just Header)
+        text = re.sub(r'^#{1,6}\s+', '', text, flags=re.MULTILINE)
+        
         # Replace markdown line breaks (double space + newline or explicit newline)
         text = text.replace('\n', '<br/>')
         
         # Convert code blocks/inline code (Mermaid doesn't support well, so use quotes)
-        import re
         text = re.sub(r'`([^`]+)`', r'"\1"', text)
         
         # Bold: **text** or __text__ (limited support, keep simple)
@@ -74,10 +78,7 @@ class MermaidExporter:
                 # Convert markdown and sanitize
                 desc = MermaidExporter._markdown_to_mermaid(desc)
                 desc = MermaidExporter._sanitize(desc)
-                # Limit description length for readability (first 60 chars)
-                if len(desc) > 60:
-                    desc = desc[:57] + "..."
-                # Combine label with description
+                # Combine label with description (full text, no truncation)
                 label = f"{label}<br/><i>{desc}</i>"
             
             if isinstance(node, (StartNode, EndNode)):

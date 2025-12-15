@@ -68,6 +68,15 @@ class FlowChart:
             raise ValueError(f"Source node {edge.source_id} does not exist.")
         if edge.target_id not in self.nodes:
             raise ValueError(f"Target node {edge.target_id} does not exist.")
+        
+        # Check for duplicate edges (same source, target, and label)
+        for existing_edge in self.edges:
+            if (existing_edge.source_id == edge.source_id and 
+                existing_edge.target_id == edge.target_id and 
+                existing_edge.label == edge.label):
+                # Duplicate edge detected - skip adding it
+                return existing_edge
+        
         self.edges.append(edge)
         return edge
 

@@ -201,3 +201,161 @@ def test_mermaid_sanitization():
     
     output = MermaidExporter.to_mermaid(chart)
     assert 'A["Say #quot;Hello#quot;"]' in output
+
+
+class TestMermaidMarkdownRendering:
+    """Test suite for comprehensive markdown rendering in Mermaid."""
+    
+    def test_markdown_headers_stripped(self):
+        """Test that markdown headers have ## markers removed."""
+        chart = FlowChart("header_test")
+        node = ProcessNode(
+            label="Check",
+            metadata={"description": """## Important Steps
+
+Follow these carefully.
+
+## Warning
+Be cautious.
+"""}
+        )
+        chart.add_node(node)
+        
+        output = MermaidExporter.to_mermaid(chart)
+        
+        # Headers should NOT have ## markers
+        assert "##" not in output
+        # But the text should be there
+        assert "Important Steps" in output
+        assert "Warning" in output
+    
+    def test_full_multiline_description_displayed(self):
+        """Test that full multiline descriptions are displayed without truncation."""
+        chart = FlowChart("multiline_test")
+        node = ProcessNode(
+            label="Process",
+            metadata={"description": """Line 1 of description
+Line 2 of description
+Line 3 of description
+Line 4 of description
+Line 5 of description"""}
+        )
+        chart.add_node(node)
+        
+        output = MermaidExporter.to_mermaid(chart)
+        
+        # All lines should be present (no ... truncation)
+        assert "Line 1 of description" in output
+        assert "Line 2 of description" in output
+        assert "Line 3 of description" in output
+        assert "Line 4 of description" in output
+        assert "Line 5 of description" in output
+        # Line breaks should be converted to <br/>
+        assert "<br/>" in output
+    
+    def test_no_ellipsis_truncation(self):
+        """Test that descriptions are NOT truncated with ..."""
+        chart = FlowChart("truncation_test")
+        node = ProcessNode(
+            label="Node",
+            metadata={"description": "This is a moderately long description that should be displayed in full without any truncation markers."}
+        )
+        chart.add_node(node)
+        
+        output = MermaidExporter.to_mermaid(chart)
+        
+        # Full text should be present
+        assert "moderately long description" in output
+        assert "displayed in full" in output
+        assert "without any truncation markers" in output
+        # Should NOT have ellipsis
+        assert "..." not in output
+    
+    def test_complex_markdown_features(self):
+        """Test that complex markdown is properly converted."""
+        chart = FlowChart("complex_test")
+        node = ProcessNode(
+            label="Commands",
+            metadata={"description": """## Run These Commands
+
+Execute `ping -c 5 server` first.
+
+Then run `ssh admin@server`.
+
+**Important**: Use sudo if needed.
+*Note*: Check logs after.
+"""}
+        )
+        chart.add_node(node)
+        
+        output = MermaidExporter.to_mermaid(chart)
+        
+        # Check markdown is converted
+        assert "##" not in output  # Headers stripped
+        assert "Run These Commands" in output
+        assert "ping -c 5 server" in output  # Code converted
+        assert "ssh admin@server" in output
+        assert "Important" in output  # Bold converted
+        assert "Note" in output  # Italic converted
+        assert "<br/>" in output  # Line breaks
+    
+    def test_very_long_description_no_truncation(self):
+        """Test that very long descriptions are fully displayed."""
+        long_desc = """This is the first line of a very long description.
+And this is the second line which continues.
+Third line adds more information.
+Fourth line provides additional details.
+Fifth line concludes the extensive description.
+Sixth line to ensure we're well past any truncation threshold.
+Seventh line for good measure.
+Eighth line to be absolutely certain."""
+        
+        chart = FlowChart("long_desc_test")
+        node = ProcessNode(
+            label="Long",
+            metadata={"description": long_desc}
+        )
+        chart.add_node(node)
+        
+        output = MermaidExporter.to_mermaid(chart)
+        
+        # All lines should be present
+        assert "first line" in output
+        assert "second line" in output
+        assert "Third line" in output
+        assert "Fourth line" in output
+        assert "Fifth line" in output
+        assert "Sixth line" in output
+        assert "Seventh line" in output
+        assert "Eighth line" in output
+        # No truncation
+        assert "..." not in output
+    
+    def test_list_items_fully_displayed(self):
+        """Test that numbered lists are fully displayed."""
+        chart = FlowChart("list_test")
+        node = ProcessNode(
+            label="Checklist",
+            metadata={"description": """Complete these:
+
+1. First task
+2. Second task  
+3. Third task
+4. Fourth task
+5. Fifth task
+6. Sixth task
+"""}
+        )
+        chart.add_node(node)
+        
+        output = MermaidExporter.to_mermaid(chart)
+        
+        # All list items should appear
+        assert "First task" in output
+        assert "Second task" in output
+        assert "Third task" in output
+        assert "Fourth task" in output
+        assert "Fifth task" in output
+        assert "Sixth task" in output
+        assert "..." not in output
+

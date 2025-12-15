@@ -41,3 +41,52 @@ def test_add_edge_missing_nodes_raises_error():
     
     with pytest.raises(ValueError):
         chart.add_edge(Edge(n1.id, "missing_id"))
+
+def test_duplicate_edges_are_prevented():
+    """Test that duplicate edges (same source, target, label) are not added."""
+    chart = FlowChart()
+    n1 = chart.add_node(StartNode(label="A"))
+    n2 = chart.add_node(EndNode(label="B"))
+    
+    # Add first edge
+    edge1 = Edge(n1.id, n2.id, label="Go")
+    chart.add_edge(edge1)
+    assert len(chart.edges) == 1
+    
+    # Try to add duplicate - should not increase edge count
+    edge2 = Edge(n1.id, n2.id, label="Go")
+    returned_edge = chart.add_edge(edge2)
+    assert len(chart.edges) == 1
+    assert returned_edge == edge1  # Returns existing edge
+
+def test_different_labeled_edges_are_allowed():
+    """Test that edges with different labels between same nodes are allowed."""
+    chart = FlowChart()
+    n1 = chart.add_node(DecisionNode(label="Check"))
+    n2 = chart.add_node(ProcessNode(label="Action"))
+    
+    # Add edges with different labels
+    edge1 = Edge(n1.id, n2.id, label="Yes")
+    edge2 = Edge(n1.id, n2.id, label="No")
+    chart.add_edge(edge1)
+    chart.add_edge(edge2)
+    
+    assert len(chart.edges) == 2
+    labels = [e.label for e in chart.edges]
+    assert "Yes" in labels
+    assert "No" in labels
+
+def test_unlabeled_duplicate_edges_are_prevented():
+    """Test that duplicate edges without labels are prevented."""
+    chart = FlowChart()
+    n1 = chart.add_node(ProcessNode(label="A"))
+    n2 = chart.add_node(ProcessNode(label="B"))
+    
+    # Add edges without labels
+    edge1 = Edge(n1.id, n2.id)
+    edge2 = Edge(n1.id, n2.id)
+    chart.add_edge(edge1)
+    chart.add_edge(edge2)
+    
+    assert len(chart.edges) == 1
+

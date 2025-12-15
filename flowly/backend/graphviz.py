@@ -1,5 +1,6 @@
 import graphviz
 import re
+from typing import Optional
 from flowly.core.ir import FlowChart, StartNode, EndNode, DecisionNode
 
 
@@ -14,39 +15,18 @@ class GraphvizExporter:
     }
     
     @staticmethod
-    def _markdown_to_html_label(label: str, description: str = None) -> str:
-        """
-        Convert node label and markdown description to Graphviz HTML-like label.
-        
-        Graphviz supports HTML-like labels with:
-        - <B>bold</B>
-        - <I>italic</I>
-        - <BR/> line breaks
-        - <FONT> tags for styling
-        - Tables for layout
-        
-        Returns an HTML-like label string that Graphviz can render.
-        """
-        if not description:
-            # Just return the label in bold
-            return f'<<B>{GraphvizExporter._escape_html(label)}</B>>'
-        
-        # Start building HTML table for better layout
-        parts = []
-        parts.append('<')
-        parts.append('<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="0">')
-        
-        # Add label as header
-        parts.append(f'<TR><TD><B>{GraphvizExporter._escape_html(label)}</B></TD></TR>')
-        
-        # Process description markdown
-        desc_html = GraphvizExporter._markdown_to_html(description)
-        parts.append(f'<TR><TD><FONT POINT-SIZE="10">{desc_html}</FONT></TD></TR>')
-        
-        parts.append('</TABLE>')
-        parts.append('>')
-        
-        return ''.join(parts)
+    def _html_label(label: str, description: Optional[str] = None) -> str:
+        """Generate HTML-like label for a node, optionally including description."""
+        if description:
+            desc_html = GraphvizExporter._markdown_to_html(description)
+            return (
+                f'<<TABLE BORDER="0" CELLBORDER="0" CELLSPACING="4" CELLPADDING="8">'
+                f'<TR><TD ALIGN="LEFT"><B>{label}</B></TD></TR>'
+                f'<TR><TD ALIGN="LEFT" BALIGN="LEFT"><FONT POINT-SIZE="10">{desc_html}</FONT></TD></TR>'
+                f'</TABLE>>'
+            )
+        else:
+            return f'<<B>{label}</B>>'
     
     @staticmethod
     def _escape_html(text: str) -> str:
@@ -61,30 +41,50 @@ class GraphvizExporter:
     @staticmethod
     def _markdown_to_html(text: str) -> str:
         """
-        Convert markdown to Graphviz HTML-like formatting.
+        Convert markdown to Graphviz HTML-like labels.
         
-        Supports:
-        - **bold** -> <B>bold</B>
-        - *italic* -> <I>italic</I>
-        - `code` -> monospace
-        - Line breaks
+        Graphviz supports a limited subset of HTML in labels:
+        - <B> for bold
+        - <I> for italic
+        - <BR/> for line breaks
+        - <FONT> for styling
         """
-        # Escape HTML first
-        text = GraphvizExporter._escape_html(text)
+        import re
         
-        # Convert line breaks
+        # Escape special HTML characters first (before adding our own HTML tags)
+        text = text.replace('&', '&amp;')
+        text = text.replace('<', '&lt;')
+        text = text.replace('>', '&gt;')
+        
+        # Use Unicode private use area characters as unique placeholders
+        HEADER_B = '\uE000'
+        HEADER_E = '\uE001'
+        BOLD_B = '\uE002'
+        BOLD_E = '\uE003'
+        ITALIC_B = '\uE004'
+        ITALIC_E = '\uE005'
+        
+        # Convert markdown headers (## Header -> <B>Header</B>)
+        text = re.sub(r'^#{1,6}\s+(.+)$', f'{HEADER_B}\\1{HEADER_E}', text, flags=re.MULTILINE)
+        
+        # Replace markdown line breaks
         text = text.replace('\n', '<BR/>')
         
+        # Convert code blocks/inline code to italic
+        text = re.sub(r'`([^`]+)`', f'{ITALIC_B}\\1{ITALIC_E}', text)
+        
         # Bold: **text** or __text__
-        text = re.sub(r'\*\*([^*]+)\*\*', r'<B>\1</B>', text)
-        text = re.sub(r'__([^_]+)__', r'<B>\1</B>', text)
+        text = re.sub(r'\*\*([^*]+)\*\*', f'{BOLD_B}\\1{BOLD_E}', text)
+        text = re.sub(r'__([^_]+)__', f'{BOLD_B}\\1{BOLD_E}', text)
         
-        # Italic: *text* or _text_ (do after bold to avoid conflicts)
-        text = re.sub(r'\*([^*]+)\*', r'<I>\1</I>', text)
-        text = re.sub(r'_([^_]+)_', r'<I>\1</I>', text)
+        # Italic: *text* or _text_
+        text = re.sub(r'\*([^*]+)\*', f'{ITALIC_B}\\1{ITALIC_E}', text)
+        text = re.sub(r'_([^_]+)_', f'{ITALIC_B}\\1{ITALIC_E}', text)
         
-        # Code: `text` (use fixed-width font)
-        text = re.sub(r'`([^`]+)`', r'<FONT FACE="monospace">\1</FONT>', text)
+        # Now replace placeholders with actual HTML tags
+        text = text.replace(HEADER_B, '<B>').replace(HEADER_E, '</B>')
+        text = text.replace(BOLD_B, '<B>').replace(BOLD_E, '</B>')
+        text = text.replace(ITALIC_B, '<I>').replace(ITALIC_E, '</I>')
         
         return text
 
@@ -111,7 +111,7 @@ class GraphvizExporter:
             # Use HTML label if description exists and is enabled
             description = node.metadata.get("description") if include_descriptions else None
             if description:
-                label = GraphvizExporter._markdown_to_html_label(node.label, description)
+                label = GraphvizExporter._html_label(node.label, description)
             else:
                 label = node.label
             
