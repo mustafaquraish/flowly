@@ -90,7 +90,7 @@ const SettingsManager = {
     autoHideControls: true,
     autoSaveState: true,
     alwaysExpandNodes: false,
-    defaultZoomLevel: 1.6,
+    defaultZoomLevel: 2.0,
   },
 
   current: null,
@@ -250,6 +250,13 @@ const CommandPalette = {
       action: "exportState",
     },
     {
+      id: "open-file",
+      label: "Open Flow File...",
+      category: "Data",
+      action: "openFile",
+      shortcut: "⌘O",
+    },
+    {
       id: "search-nodes",
       label: "Search Nodes...",
       category: "Navigation",
@@ -354,6 +361,17 @@ const CommandPalette = {
       ) {
         e.preventDefault();
         this.open("nodes");
+      }
+      // Cmd+O or Ctrl+O for opening file
+      else if (
+        (e.metaKey || e.ctrlKey) &&
+        !e.shiftKey &&
+        e.key.toLowerCase() === "o"
+      ) {
+        e.preventDefault();
+        if (this.app) {
+          this.app.openFile();
+        }
       }
       // Escape to close
       else if (e.key === "Escape" && this.isOpen) {
@@ -714,6 +732,9 @@ const CommandPalette = {
             break;
           case "exportState":
             this.app.exportState();
+            break;
+          case "openFile":
+            this.app.openFile();
             break;
           case "openNodeSearch":
             setTimeout(() => this.open("nodes"), 50);
@@ -1793,6 +1814,12 @@ class FlowPlay {
       exportBtn.addEventListener("click", () => this.exportState());
     }
 
+    // Open file button
+    const openFileBtn = document.getElementById("open-file-btn");
+    if (openFileBtn) {
+      openFileBtn.addEventListener("click", () => this.openFile());
+    }
+
     // Zoom level click to reset
     const zoomLevel = document.getElementById("zoom-level");
     if (zoomLevel) {
@@ -2520,6 +2547,8 @@ class FlowPlay {
         d3.select(`#node-${nodeId}`).classed("visited", true);
       });
       this.goToNode(this.currentNode, null, false);
+      // Update global cache toggle count after loading state
+      this.updateGlobalCacheToggle();
       return;
     }
 
@@ -2859,6 +2888,12 @@ class FlowPlay {
 
     // Use event delegation - attach once to container instead of per-element
     this.setupCacheEditorDelegation(container, "node");
+
+    // Also update the global cache panel if it's open
+    const globalPanel = document.getElementById("global-cache-panel");
+    if (globalPanel && !globalPanel.classList.contains("hidden")) {
+      this.renderGlobalCache();
+    }
   }
 
   renderOverlayActions() {
@@ -2932,6 +2967,20 @@ class FlowPlay {
         this.nodeCache.set(this.currentNode.id, cache);
       }
 
+      // Save state to localStorage after each edit
+      FlowState.saveToStorage();
+      
+      // Update global cache toggle count
+      this.updateGlobalCacheToggle();
+
+      // Always update global cache panel if it's open (for real-time sync)
+      if (cacheType === "node") {
+        const globalPanel = document.getElementById("global-cache-panel");
+        if (globalPanel && !globalPanel.classList.contains("hidden")) {
+          this.renderGlobalCache();
+        }
+      }
+
       if (needsRerender) {
         const wasKey = e.target.classList.contains("cache-key");
         const renderFn =
@@ -2978,6 +3027,10 @@ class FlowPlay {
         } else {
           this.renderGlobalCache();
         }
+        // Save state after deletion
+        FlowState.saveToStorage();
+        // Update global cache toggle count
+        this.updateGlobalCacheToggle();
       }
     });
   }
@@ -3218,25 +3271,205 @@ class FlowPlay {
     const container = document.getElementById("global-cache-entries");
     if (!container) return;
 
-    // Use shared helper to generate rows (reuse same structure as node cache)
-    container.innerHTML = CacheEditorHelpers.generateRows(
-      this.globalCache,
-      "Add global key...",
-      escapeHtml
-    );
+    // Build a combined view of global cache + all node caches
+    let html = "";
 
-    // Use event delegation - same as node cache
-    this.setupCacheEditorDelegation(container, "global");
+    // First, render global-only entries (not tied to any node)
+    const globalEntries = Object.entries(this.globalCache);
+    if (globalEntries.length > 0) {
+      html += '<div class="cache-section"><div class="cache-section-header">Global</div>';
+      globalEntries.forEach(([key, value]) => {
+        html += this.renderGlobalCacheRow(key, value, null);
+      });
+      html += '</div>';
+    }
+
+    // Add empty row for new global entries
+    html += `
+      <div class="cache-row empty-row global-entry" data-node-id="">
+        <textarea class="cache-key" placeholder="Add global key..." data-field="key" data-original-key=""></textarea>
+        <textarea class="cache-value" placeholder="Value" data-field="value" data-key=""></textarea>
+        <button class="delete-cache-btn" style="visibility:hidden">×</button>
+      </div>
+    `;
+
+    // Then, render entries from each node's cache
+    this.nodeCache.forEach((cache, nodeId) => {
+      const entries = Object.entries(cache);
+      if (entries.length === 0) return;
+
+      const node = this.nodes[nodeId];
+      const nodeLabel = node ? node.label : nodeId;
+      const isCurrent = this.currentNode?.id === nodeId;
+
+      html += `<div class="cache-section node-cache-section ${isCurrent ? 'current-node' : ''}">`;
+      html += `<div class="cache-section-header">
+        <span class="node-cache-label" title="${escapeHtml(nodeLabel)}">${escapeHtml(truncateLabel(nodeLabel, 25))}</span>
+        <button class="jump-to-node-btn" data-node-id="${escapeHtml(nodeId)}" title="Jump to node">→</button>
+      </div>`;
+
+      entries.forEach(([key, value]) => {
+        html += this.renderGlobalCacheRow(key, value, nodeId);
+      });
+      html += '</div>';
+    });
+
+    if (globalEntries.length === 0 && this.nodeCache.size === 0) {
+      html = '<div class="empty-cache">No data stored yet</div>' + html.slice(html.indexOf('<div class="cache-row empty-row'));
+    }
+
+    container.innerHTML = html;
+
+    // Setup event delegation for the global cache panel
+    this.setupGlobalCacheEditorDelegation(container);
 
     // Update toggle button to show count
     this.updateGlobalCacheToggle();
+  }
+
+  /**
+   * Render a single row in the global cache panel
+   */
+  renderGlobalCacheRow(key, value, nodeId) {
+    const nodeIdAttr = nodeId ? `data-node-id="${escapeHtml(nodeId)}"` : 'data-node-id=""';
+    const nodeClass = nodeId ? 'node-entry' : 'global-entry';
+    return `
+      <div class="cache-row ${nodeClass}" ${nodeIdAttr}>
+        <textarea class="cache-key" placeholder="Key" data-field="key" data-original-key="${escapeHtml(key)}">${escapeHtml(key)}</textarea>
+        <textarea class="cache-value" placeholder="Value" data-field="value" data-key="${escapeHtml(key)}">${escapeHtml(value)}</textarea>
+        <button class="delete-cache-btn" data-key="${escapeHtml(key)}">×</button>
+      </div>
+    `;
+  }
+
+  /**
+   * Sets up event delegation for the global cache panel
+   * Handles both global entries and node cache entries
+   */
+  setupGlobalCacheEditorDelegation(container) {
+    // Skip if already set up
+    if (container.dataset.delegationSetup === "true") return;
+    container.dataset.delegationSetup = "true";
+
+    // Input event delegation - only commit changes on blur
+    container.addEventListener("blur", (e) => {
+      if (!e.target.classList.contains("cache-key") && 
+          !e.target.classList.contains("cache-value")) return;
+
+      const row = e.target.closest(".cache-row");
+      const nodeId = row.dataset.nodeId;
+      const isGlobalEntry = nodeId === "";
+
+      const keyInput = row.querySelector(".cache-key");
+      const valInput = row.querySelector(".cache-value");
+      const originalKey = keyInput.dataset.originalKey;
+      const currentKey = keyInput.value.trim();
+      const currentValue = valInput.value;
+
+      // Get the appropriate cache
+      let cache;
+      if (isGlobalEntry) {
+        cache = this.globalCache;
+      } else {
+        cache = this.nodeCache.get(nodeId) || {};
+      }
+
+      let needsRerender = false;
+
+      if (originalKey) {
+        // Modification of existing entry
+        if (currentKey !== originalKey) {
+          // Key changed
+          delete cache[originalKey];
+          if (currentKey) {
+            cache[currentKey] = currentValue;
+          }
+          needsRerender = true;
+        } else if (currentKey) {
+          // Just value changed
+          cache[currentKey] = currentValue;
+        }
+      } else {
+        // New entry creation
+        if (currentKey) {
+          cache[currentKey] = currentValue;
+          needsRerender = true;
+        }
+      }
+
+      // Update the cache
+      if (!isGlobalEntry) {
+        this.nodeCache.set(nodeId, cache);
+        // Also update the node overlay if it's the current node
+        if (this.currentNode?.id === nodeId) {
+          this.renderOverlayData();
+        }
+      }
+
+      // Save state
+      FlowState.saveToStorage();
+
+      if (needsRerender) {
+        this.renderGlobalCache();
+      }
+    }, true); // Use capture phase for blur
+
+    // Click event delegation for delete buttons and jump buttons
+    container.addEventListener("click", (e) => {
+      // Handle delete button
+      if (e.target.classList.contains("delete-cache-btn")) {
+        e.stopPropagation();
+        const row = e.target.closest(".cache-row");
+        const nodeId = row.dataset.nodeId;
+        const isGlobalEntry = nodeId === "";
+        const key = e.target.dataset.key;
+
+        if (!key) return;
+
+        let cache;
+        if (isGlobalEntry) {
+          cache = this.globalCache;
+        } else {
+          cache = this.nodeCache.get(nodeId) || {};
+        }
+
+        delete cache[key];
+
+        if (!isGlobalEntry) {
+          this.nodeCache.set(nodeId, cache);
+          // Also update the node overlay if it's the current node
+          if (this.currentNode?.id === nodeId) {
+            this.renderOverlayData();
+          }
+        }
+
+        FlowState.saveToStorage();
+        this.renderGlobalCache();
+        return;
+      }
+
+      // Handle jump-to-node button
+      if (e.target.classList.contains("jump-to-node-btn")) {
+        e.stopPropagation();
+        const nodeId = e.target.dataset.nodeId;
+        if (nodeId && this.nodes[nodeId]) {
+          this.navigateToNode(nodeId);
+        }
+        return;
+      }
+    });
   }
 
   updateGlobalCacheToggle() {
     const toggle = document.getElementById("global-cache-toggle");
     if (!toggle) return;
 
-    const count = Object.keys(this.globalCache).length;
+    // Count all entries: global cache + all node caches
+    let count = Object.keys(this.globalCache).length;
+    this.nodeCache.forEach((cache) => {
+      count += Object.keys(cache).length;
+    });
+
     const countBadge =
       count > 0 ? ` <span class="cache-count">(${count})</span>` : "";
     toggle.innerHTML = `Global Data${countBadge}`;
@@ -3251,9 +3484,12 @@ class FlowPlay {
       exportDate: new Date().toISOString(),
       currentNode: this.currentNode?.id,
       history: this.history,
+      historyIndex: this.historyIndex,
       visitedNodes: Array.from(this.visitedNodes),
       globalCache: this.globalCache,
       nodeCache: Object.fromEntries(this.nodeCache),
+      // Include the original flow data for complete export
+      flowData: this.flowData,
     };
 
     const json = JSON.stringify(state, null, 2);
@@ -3262,13 +3498,118 @@ class FlowPlay {
 
     const a = document.createElement("a");
     a.href = url;
-    a.download = `flowplay-state-${
-      this.flowData?.name || "export"
+    a.download = `flowplay-export-${
+      this.flowData?.name || "flow"
     }-${Date.now()}.json`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  }
+
+  // =========================================
+  // OPEN FILE
+  // =========================================
+  openFile() {
+    // Create a hidden file input
+    const input = document.createElement("input");
+    input.type = "file";
+    input.accept = ".json";
+    input.style.display = "none";
+
+    input.addEventListener("change", async (e) => {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      try {
+        this.showLoading(true);
+        const text = await file.text();
+        const data = JSON.parse(text);
+
+        // Check if this is an exported session state (has flowData property)
+        // or a raw flow JSON file
+        if (data.flowData) {
+          // This is an exported session - restore full state
+          await this.loadFromExport(data);
+        } else if (data.nodes && data.edges) {
+          // This is a raw flow JSON file
+          await this.loadNewFlow(data);
+        } else {
+          throw new Error("Invalid file format: must be a flow JSON or exported session");
+        }
+
+        this.showLoading(false);
+      } catch (error) {
+        console.error("Failed to load file:", error);
+        alert("Failed to load file: " + error.message);
+        this.showLoading(false);
+      }
+
+      // Clean up
+      document.body.removeChild(input);
+    });
+
+    document.body.appendChild(input);
+    input.click();
+  }
+
+  /**
+   * Load a new flow from raw flow JSON data
+   */
+  async loadNewFlow(flowData) {
+    // Reset all state
+    FlowState.reset();
+
+    // Initialize with new flow data
+    FlowState.init(flowData);
+
+    // Update title
+    document.getElementById("flowchart-name").textContent = flowData.name;
+
+    // Re-render the flowchart
+    this.g.selectAll("*").remove();
+    this.renderFlowchart();
+
+    // Update mini-map
+    this.renderMiniMap();
+
+    // Setup expanded overlays if needed
+    if (this.settings.alwaysExpandNodes) {
+      this.setupExpandedOverlays();
+    }
+
+    // Start the flow
+    this.start();
+  }
+
+  /**
+   * Load from an exported session state (includes flow data and session state)
+   */
+  async loadFromExport(exportData) {
+    // Load the flow data first
+    await this.loadNewFlow(exportData.flowData);
+
+    // Restore session state
+    FlowState.history = exportData.history || [];
+    FlowState.historyIndex = exportData.historyIndex ?? -1;
+    FlowState.visitedNodes = new Set(exportData.visitedNodes || []);
+    FlowState.globalCache = exportData.globalCache || {};
+    FlowState.nodeCache = new Map(Object.entries(exportData.nodeCache || {}));
+
+    // Restore visited visual state
+    this.visitedNodes.forEach((nodeId) => {
+      d3.select(`#node-${nodeId}`).classed("visited", true);
+    });
+
+    // Navigate to the current node from the export
+    if (exportData.currentNode && this.nodes[exportData.currentNode]) {
+      FlowState.currentNode = this.nodes[exportData.currentNode];
+      this.goToNode(this.currentNode, null, false);
+    }
+
+    // Update global cache UI
+    this.renderGlobalCache();
+    this.updateGlobalCacheToggle();
   }
 
   // =========================================
