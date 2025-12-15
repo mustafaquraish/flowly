@@ -1,10 +1,26 @@
-from typing import Optional, Dict, Any
+"""Imperative FlowBuilder for manual flowchart construction."""
+
+from typing import Optional
+
 from flowly.core.ir import FlowChart, Node, StartNode, ProcessNode, DecisionNode, EndNode, Edge
 
+
 class FlowBuilder:
+    """
+    Imperative API for building flowcharts by manually adding nodes and edges.
+    
+    Example:
+        builder = FlowBuilder("My Flow")
+        start = builder.start("Begin")
+        proc = builder.action("Do something")
+        end = builder.end("Done")
+        builder.connect(start, proc)
+        builder.connect(proc, end)
+        chart = builder.build()
+    """
+    
     def __init__(self, name: str = "FlowChart"):
         self.flowchart = FlowChart(name)
-        # Keep track of last added node for simple linear chaining if we want to add convenience methods later
         self.last_node: Optional[Node] = None
 
     def start(self, label: str = "Start", node_id: Optional[str] = None, description: Optional[str] = None) -> Node:

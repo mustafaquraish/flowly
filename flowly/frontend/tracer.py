@@ -28,8 +28,8 @@ Example:
     chart = flow.build()  # Contains only the executed path
 """
 
-from typing import Optional, Dict, Any, List, Union
-from contextlib import contextmanager
+from typing import Optional, Dict, Any, List
+
 from flowly.core.ir import (
     FlowChart, Node, StartNode, EndNode, ProcessNode, DecisionNode, Edge
 )

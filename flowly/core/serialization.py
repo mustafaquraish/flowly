@@ -1,8 +1,12 @@
+"""
+JSON serialization for FlowChart objects.
+
+The serialized format is designed to support both round-trip deserialization
+and direct consumption by the flowplay HTML frontend.
+"""
+
 import json
 from typing import Dict, Any, Type
-# We might add yaml support later if requested, keeping it simple with JSON first but structurally ready.
-# To support YAML without extra deps, we'd need PyYAML, but standard lib only has json.
-# For now, let's implement JSON fully and structure for extensibility.
 
 from flowly.core.ir import FlowChart, Node, Edge, StartNode, EndNode, ProcessNode, DecisionNode
 
@@ -15,6 +19,15 @@ NODE_TYPE_MAP: Dict[str, Type[Node]] = {
 }
 
 class JsonSerializer:
+    """
+    Serializes and deserializes FlowChart objects to/from JSON.
+    
+    The serialized format includes a 'graph' field with precomputed edge lookups
+    (incomingEdges, outgoingEdges) that are used by the flowplay HTML frontend
+    for efficient graph navigation. These are NOT used during deserialization
+    since they can be recomputed from the edges list.
+    """
+    
     @staticmethod
     def to_dict(flowchart: FlowChart) -> Dict[str, Any]:
         nodes_data = []
@@ -57,6 +70,8 @@ class JsonSerializer:
             "metadata": flowchart.metadata,
             "nodes": nodes_data,
             "edges": edges_data,
+            # Precomputed edge lookups for the flowplay HTML frontend.
+            # Maps node IDs to lists of edge IDs for efficient traversal.
             "graph": {
                 "incomingEdges": incoming_edges,
                 "outgoingEdges": outgoing_edges

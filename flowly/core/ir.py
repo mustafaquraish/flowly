@@ -1,5 +1,15 @@
+"""
+Intermediate Representation (IR) for flowcharts.
+
+This module defines the core data structures used to represent flowcharts:
+- Node types: Node, StartNode, EndNode, ProcessNode, DecisionNode
+- Edge: Connections between nodes
+- FlowChart: Container for the complete graph
+"""
+
 import uuid
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any
+
 
 class Node:
     """Base class for all nodes in the Flowly graph."""

@@ -1,6 +1,10 @@
+"""HTML exporter that bundles flowcharts into standalone interactive HTML files."""
+
 import json
+import re
 import sys
 from pathlib import Path
+
 from flowly.core.ir import FlowChart
 from flowly.core.serialization import JsonSerializer
 
@@ -38,8 +42,6 @@ class HtmlExporter:
     @staticmethod
     def _extract_body_content(html: str) -> str:
         """Extract content between <body> tags, excluding script src tags."""
-        import re
-        
         # Find body content
         body_match = re.search(r'<body[^>]*>(.*?)</body>', html, re.DOTALL)
         if not body_match:
@@ -55,8 +57,6 @@ class HtmlExporter:
     @staticmethod
     def _extract_head_content(html: str) -> str:
         """Extract content from <head> tags, excluding local CSS link."""
-        import re
-        
         # Find head content
         head_match = re.search(r'<head[^>]*>(.*?)</head>', html, re.DOTALL)
         if not head_match:

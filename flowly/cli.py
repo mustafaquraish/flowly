@@ -5,6 +5,7 @@ Usage:
     flowly ./examples/demo_dsl.py -o ./build/
     flowly ./examples/demo_dsl.py -o ./build/ --format mermaid
     flowly ./examples/demo_dsl.py -o ./build/ --format graphviz
+    flowly ./examples/demo_dsl.py -o ./build/ --format svg
 """
 
 import argparse
@@ -13,17 +14,18 @@ import sys
 from pathlib import Path
 from typing import List, Tuple
 
-from flowly.frontend.dsl import FlowBuilder
+from flowly.frontend.dsl import Flow
 from flowly.core.ir import FlowChart
 from flowly.backend.html import HtmlExporter
 from flowly.backend.mermaid import MermaidExporter
 from flowly.backend.graphviz import GraphvizExporter
+from flowly.backend.svg import SvgExporter
 from flowly.core.serialization import JsonSerializer
 
 
 def discover_flowcharts(filepath: Path) -> List[Tuple[str, FlowChart]]:
     """
-    Load a Python file and discover all FlowBuilder instances at module level.
+    Load a Python file and discover all Flow decorator instances at module level.
     
     Returns a list of (name, flowchart) tuples.
     """
@@ -44,11 +46,11 @@ def discover_flowcharts(filepath: Path) -> List[Tuple[str, FlowChart]]:
     except Exception as e:
         raise RuntimeError(f"Error executing {filepath}: {e}") from e
     
-    # Find all FlowBuilder instances
+    # Find all Flow decorator instances (they have a .chart attribute)
     flowcharts = []
     for name in dir(module):
         obj = getattr(module, name)
-        if isinstance(obj, FlowBuilder) and obj.chart is not None:
+        if isinstance(obj, Flow) and obj.chart is not None:
             flowcharts.append((name, obj.chart))
     
     return flowcharts
@@ -70,11 +72,14 @@ def export_flowchart(
     elif format == "graphviz" or format == "dot":
         content = GraphvizExporter.to_dot(chart)
         ext = ".dot"
+    elif format == "svg":
+        content = SvgExporter.to_svg(chart)
+        ext = ".svg"
     elif format == "json":
         content = JsonSerializer.to_json(chart)
         ext = ".json"
     else:
-        raise ValueError(f"Unknown format: {format}. Use: html, mermaid, graphviz, json")
+        raise ValueError(f"Unknown format: {format}. Use: html, mermaid, graphviz, svg, json")
     
     # Create output filename
     # Sanitize the chart name for use as filename
@@ -110,7 +115,7 @@ def main(argv: List[str] = None) -> int:
     
     parser.add_argument(
         "-f", "--format",
-        choices=["html", "mermaid", "graphviz", "dot", "json"],
+        choices=["html", "mermaid", "graphviz", "dot", "svg", "json"],
         default="html",
         help="Output format (default: html)"
     )
