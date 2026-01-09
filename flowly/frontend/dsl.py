@@ -56,8 +56,10 @@ class NodeDef:
     description: Optional[str] = None
     metadata: dict = field(default_factory=dict)
 
-    # Internal: the actual IR node (created when first used)
-    _ir_node: Optional[IRNode] = field(default=None, repr=False)
+    # Internal: the actual IR nodes (created when used - may be multiple if different outgoing edges needed)
+    _ir_nodes: List[IRNode] = field(default_factory=list, repr=False)
+    # Track which IR node is currently "active" for edge tracking
+    _current_ir_node: Optional[IRNode] = field(default=None, repr=False)
 
     def __post_init__(self):
         if self.description:
@@ -73,19 +75,48 @@ class NodeDef:
         _current_flow._add_process_node(self)
         return self
 
+    def _create_new_node(self, flowchart: FlowChart) -> ProcessNode:
+        """Create a new IR node instance."""
+        meta = dict(self.metadata)
+        if self.description:
+            meta["description"] = self.description
+        node = ProcessNode(label=self.label, metadata=meta)
+        flowchart.add_node(node)
+        self._ir_nodes.append(node)
+        return node
+
+    def _get_node_for_target(self, flowchart: FlowChart, target_id: str) -> ProcessNode:
+        """
+        Get an IR node that can have an outgoing edge to target_id.
+        
+        If an existing node has no outgoing edges or already has an edge to target_id,
+        return that node. Otherwise, create a new node.
+        """
+        for node in self._ir_nodes:
+            # Check existing outgoing edges from this node
+            outgoing = [e for e in flowchart.edges if e.source_id == node.id]
+            if not outgoing:
+                # No outgoing edges yet - this node can be used
+                return node
+            # Check if any edge already goes to target_id
+            if any(e.target_id == target_id for e in outgoing):
+                # Already has edge to this target - can reuse
+                return node
+        
+        # No suitable existing node - create new one
+        return self._create_new_node(flowchart)
+
     def _get_or_create_node(self, flowchart: FlowChart) -> ProcessNode:
-        """Get the IR node, creating it if needed."""
-        if self._ir_node is None:
-            meta = dict(self.metadata)
-            if self.description:
-                meta["description"] = self.description
-            self._ir_node = ProcessNode(label=self.label, metadata=meta)
-            flowchart.add_node(self._ir_node)
-        return self._ir_node
+        """Get an IR node without knowing the target yet. Used for initial placement."""
+        if not self._ir_nodes:
+            return self._create_new_node(flowchart)
+        # Return the most recently created node (will be checked for conflicts later)
+        return self._ir_nodes[-1]
 
     def _reset(self):
         """Reset for new flow building."""
-        self._ir_node = None
+        self._ir_nodes = []
+        self._current_ir_node = None
 
 
 @dataclass
@@ -161,7 +192,38 @@ class FlowContext:
         self._used_nodes: List[NodeDef | DecisionDef] = []
 
         # Decision context stack for tracking branches
-        self._decision_stack: List[tuple[DecisionDef, str]] = []
+        self._decision_stack: List[tuple[DecisionDef, str, bool]] = []  # (def, label, negated)
+
+        # Loop context stack for tracking while loops (for continue/break)
+        self._loop_stack: List[tuple[DecisionNode | None, DecisionDef | None, List]] = []  # (decision_node, decision_def, break_exits)
+
+        # Track edges already created FROM a node to avoid duplicates from different branches
+        # Key: (source_id, target_id), Value: edge_label
+        self._created_edges: set[tuple[str, str]] = set()
+
+    def _resolve_exit_node(self, exit_item: tuple, target_id: str) -> IRNode:
+        """
+        Resolve an exit item to the appropriate IR node for connecting to target_id.
+        
+        exit_item is either (IRNode, label) or (NodeDef, label).
+        For NodeDef, we find or create an IR node that can have an edge to target_id.
+        """
+        exit_node_or_def, _ = exit_item
+        
+        if isinstance(exit_node_or_def, NodeDef):
+            # This is a reusable node - find the right IR node for this target
+            return exit_node_or_def._get_node_for_target(self.flowchart, target_id)
+        else:
+            # It's already an IR node
+            return exit_node_or_def
+
+    def _connect_exits_to_target(self, target_id: str) -> None:
+        """Connect all current exits to a target node, resolving NodeDefs as needed."""
+        for exit_item in self._exits:
+            exit_node_or_def, edge_label = exit_item
+            source_node = self._resolve_exit_node(exit_item, target_id)
+            edge = Edge(source_node.id, target_id, label=edge_label)
+            self.flowchart.add_edge(edge)
 
     def step(self, label: str, description: Optional[str] = None) -> ProcessNode:
         """
@@ -174,9 +236,7 @@ class FlowContext:
         self.flowchart.add_node(node)
 
         # Connect from exits
-        for exit_node, edge_label in self._exits:
-            edge = Edge(exit_node.id, node.id, label=edge_label)
-            self.flowchart.add_edge(edge)
+        self._connect_exits_to_target(node.id)
 
         self._exits = [(node, None)]
         return node
@@ -192,9 +252,7 @@ class FlowContext:
         self.flowchart.add_node(node)
 
         # Connect from exits
-        for exit_node, edge_label in self._exits:
-            edge = Edge(exit_node.id, node.id, label=edge_label)
-            self.flowchart.add_edge(edge)
+        self._connect_exits_to_target(node.id)
 
         self._exits = []  # End terminates the path
         return node
@@ -202,14 +260,14 @@ class FlowContext:
     def _add_process_node(self, node_def: NodeDef) -> None:
         """Add a process node to the flow."""
         ir_node = node_def._get_or_create_node(self.flowchart)
+        node_def._current_ir_node = ir_node
         self._used_nodes.append(node_def)
 
         # Connect from exits
-        for exit_node, edge_label in self._exits:
-            edge = Edge(exit_node.id, ir_node.id, label=edge_label)
-            self.flowchart.add_edge(edge)
+        self._connect_exits_to_target(ir_node.id)
 
-        self._exits = [(ir_node, None)]
+        # Store the node_def itself in exits so we can resolve the correct IR node later
+        self._exits = [(node_def, None)]
 
     def _add_decision_node(self, decision_def: DecisionDef) -> None:
         """Add a decision node to the flow."""
@@ -217,15 +275,13 @@ class FlowContext:
         self._used_nodes.append(decision_def)
 
         # Connect from exits
-        for exit_node, edge_label in self._exits:
-            edge = Edge(exit_node.id, ir_node.id, label=edge_label)
-            self.flowchart.add_edge(edge)
+        self._connect_exits_to_target(ir_node.id)
 
         # Decision clears exits - branches set them
         self._exits = []
 
-        # Push to decision stack
-        self._decision_stack.append((decision_def, decision_def.yes_label))
+        # Push to decision stack (def, label, negated=False)
+        self._decision_stack.append((decision_def, decision_def.yes_label, False))
 
 
 class FlowBuilder:
@@ -327,9 +383,7 @@ class FlowBuilder:
             if ctx._exits:
                 end = EndNode(label="End")
                 self.chart.add_node(end)
-                for exit_node, edge_label in ctx._exits:
-                    edge = Edge(exit_node.id, end.id, label=edge_label)
-                    self.chart.add_edge(edge)
+                ctx._connect_exits_to_target(end.id)
         finally:
             _current_flow = None
             # Reset all used nodes for potential reuse
@@ -354,6 +408,12 @@ class FlowBuilder:
 
         elif isinstance(stmt, ast.While):
             self._process_while(stmt, ctx)
+
+        elif isinstance(stmt, ast.Continue):
+            self._process_continue(stmt, ctx)
+
+        elif isinstance(stmt, ast.Break):
+            self._process_break(stmt, ctx)
 
         elif isinstance(stmt, ast.Return):
             # Check if returning a call like `return flow.end("Failed")`
@@ -425,28 +485,46 @@ class FlowBuilder:
         """Process an if statement."""
         import ast
 
+        # Check if the condition is negated
+        negated = False
+        test_expr = if_stmt.test
+
+        if isinstance(test_expr, ast.UnaryOp) and isinstance(test_expr.op, ast.Not):
+            negated = True
+            test_expr = test_expr.operand
+
         # Execute the condition (should be a Decision call)
-        if isinstance(if_stmt.test, ast.Call):
-            self._execute_call(if_stmt.test, ctx)
+        if isinstance(test_expr, ast.Call):
+            self._execute_call(test_expr, ctx)
 
         # Get the decision from the stack
         if not ctx._decision_stack:
             raise RuntimeError("If statement without a Decision call in condition")
 
-        decision_def, _ = ctx._decision_stack.pop()
+        decision_def, _, _ = ctx._decision_stack.pop()
         decision_node = decision_def._ir_node
+
+        # Determine branch labels based on negation
+        if negated:
+            # `if not cond()` - body is the "No" branch, else is the "Yes" branch
+            body_label = decision_def.no_label
+            else_label = decision_def.yes_label
+        else:
+            # Normal `if cond()` - body is the "Yes" branch, else is the "No" branch
+            body_label = decision_def.yes_label
+            else_label = decision_def.no_label
 
         # Save exits for merging later
         all_exits = []
 
-        # Process "if" body (Yes branch)
-        ctx._exits = [(decision_node, decision_def.yes_label)]
+        # Process "if" body
+        ctx._exits = [(decision_node, body_label)]
         self._process_statements(if_stmt.body, ctx)
         all_exits.extend(ctx._exits)
 
-        # Process "else" body (No branch)
+        # Process "else" body
         if if_stmt.orelse:
-            ctx._exits = [(decision_node, decision_def.no_label)]
+            ctx._exits = [(decision_node, else_label)]
 
             if len(if_stmt.orelse) == 1 and isinstance(if_stmt.orelse[0], ast.If):
                 # elif
@@ -456,8 +534,8 @@ class FlowBuilder:
 
             all_exits.extend(ctx._exits)
         else:
-            # No else - decision's No path continues
-            all_exits.append((decision_node, decision_def.no_label))
+            # No else - other path continues
+            all_exits.append((decision_node, else_label))
 
         # Merge exits
         ctx._exits = all_exits
@@ -466,27 +544,140 @@ class FlowBuilder:
         """Process a while loop."""
         import ast
 
-        # Execute the condition
-        if isinstance(while_stmt.test, ast.Call):
-            self._execute_call(while_stmt.test, ctx)
+        # Check for `while True` (infinite loop)
+        is_infinite_loop = False
+        if isinstance(while_stmt.test, ast.Constant) and while_stmt.test.value is True:
+            is_infinite_loop = True
+        elif isinstance(while_stmt.test, ast.NameConstant) and while_stmt.test.value is True:
+            # Python 3.7 compatibility
+            is_infinite_loop = True
+
+        if is_infinite_loop:
+            # `while True` - create an implicit decision node for the loop point
+            # This allows continue statements to loop back
+            loop_node = ProcessNode(label="(loop)")
+            self.chart.add_node(loop_node)
+
+            # Connect current exits to loop node, resolving NodeDefs
+            for exit_item in ctx._exits:
+                exit_node_or_def, edge_label = exit_item
+                if isinstance(exit_node_or_def, NodeDef):
+                    source_node = exit_node_or_def._get_node_for_target(self.chart, loop_node.id)
+                else:
+                    source_node = exit_node_or_def
+                edge = Edge(source_node.id, loop_node.id, label=edge_label)
+                self.chart.add_edge(edge)
+
+            # Push loop context (no decision node, no decision def, empty break_exits list)
+            break_exits: List[tuple[IRNode, Optional[str]]] = []
+            ctx._loop_stack.append((loop_node, None, break_exits))
+
+            # Process loop body
+            ctx._exits = [(loop_node, None)]
+            self._process_statements(while_stmt.body, ctx)
+
+            # Back-edge to loop node (for any exits that didn't hit break), resolving NodeDefs
+            for exit_item in ctx._exits:
+                exit_node_or_def, _ = exit_item
+                if isinstance(exit_node_or_def, NodeDef):
+                    source_node = exit_node_or_def._get_node_for_target(self.chart, loop_node.id)
+                else:
+                    source_node = exit_node_or_def
+                edge = Edge(source_node.id, loop_node.id)
+                self.chart.add_edge(edge)
+
+            # Pop loop context
+            ctx._loop_stack.pop()
+
+            # Exits are from break statements only
+            ctx._exits = break_exits
+            return
+
+        # Check if the condition is negated
+        negated = False
+        test_expr = while_stmt.test
+
+        if isinstance(test_expr, ast.UnaryOp) and isinstance(test_expr.op, ast.Not):
+            negated = True
+            test_expr = test_expr.operand
+
+        # Execute the condition (should be a Decision call)
+        if isinstance(test_expr, ast.Call):
+            self._execute_call(test_expr, ctx)
 
         if not ctx._decision_stack:
             raise RuntimeError("While statement without a Decision call in condition")
 
-        decision_def, _ = ctx._decision_stack.pop()
+        decision_def, _, _ = ctx._decision_stack.pop()
         decision_node = decision_def._ir_node
 
-        # Process loop body (Yes/continue branch)
-        ctx._exits = [(decision_node, decision_def.yes_label)]
+        # Determine branch labels based on negation
+        if negated:
+            # `while not cond()` - body is the "No" branch, exit is the "Yes" branch
+            body_label = decision_def.no_label
+            exit_label = decision_def.yes_label
+        else:
+            # Normal `while cond()` - body is the "Yes" branch, exit is the "No" branch
+            body_label = decision_def.yes_label
+            exit_label = decision_def.no_label
+
+        # Push loop context for continue/break handling
+        break_exits: List[tuple[IRNode, Optional[str]]] = []
+        ctx._loop_stack.append((decision_node, decision_def, break_exits))
+
+        # Process loop body
+        ctx._exits = [(decision_node, body_label)]
         self._process_statements(while_stmt.body, ctx)
 
-        # Back-edge to decision
-        for exit_node, _ in ctx._exits:
-            edge = Edge(exit_node.id, decision_node.id)
+        # Back-edge to decision (for any exits that didn't hit break/continue)
+        # Need to resolve NodeDefs when adding back-edges
+        for exit_item in ctx._exits:
+            exit_node_or_def, _ = exit_item
+            if isinstance(exit_node_or_def, NodeDef):
+                source_node = exit_node_or_def._get_node_for_target(self.chart, decision_node.id)
+            else:
+                source_node = exit_node_or_def
+            edge = Edge(source_node.id, decision_node.id)
             self.chart.add_edge(edge)
 
-        # Exit: No branch continues
-        ctx._exits = [(decision_node, decision_def.no_label)]
+        # Pop loop context
+        ctx._loop_stack.pop()
+
+        # Exit: from decision's exit branch + any break exits
+        ctx._exits = [(decision_node, exit_label)] + break_exits
+
+    def _process_continue(self, cont_stmt, ctx: FlowContext) -> None:
+        """Process a continue statement."""
+        if not ctx._loop_stack:
+            raise RuntimeError("continue statement outside of a while loop")
+
+        loop_node, decision_def, _ = ctx._loop_stack[-1]
+
+        # Connect current exits to the loop decision node, resolving NodeDefs
+        for exit_item in ctx._exits:
+            exit_node_or_def, edge_label = exit_item
+            if isinstance(exit_node_or_def, NodeDef):
+                source_node = exit_node_or_def._get_node_for_target(self.chart, loop_node.id)
+            else:
+                source_node = exit_node_or_def
+            edge = Edge(source_node.id, loop_node.id, label=edge_label)
+            self.chart.add_edge(edge)
+
+        # Clear exits - continue redirects flow back to the loop
+        ctx._exits = []
+
+    def _process_break(self, break_stmt, ctx: FlowContext) -> None:
+        """Process a break statement."""
+        if not ctx._loop_stack:
+            raise RuntimeError("break statement outside of a while loop")
+
+        _, _, break_exits = ctx._loop_stack[-1]
+
+        # Save current exits to break_exits - they will be processed after the loop
+        break_exits.extend(ctx._exits)
+
+        # Clear exits - break redirects flow out of the loop
+        ctx._exits = []
 
 
 # Main decorator

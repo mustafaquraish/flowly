@@ -1546,6 +1546,11 @@ class FlowPlay {
       const description = node.metadata?.description || "";
       if (description) {
         descEl.innerHTML = marked.parse(description.trim());
+        // Make all links open in new tab
+        descEl.querySelectorAll("a").forEach((a) => {
+          a.setAttribute("target", "_blank");
+          a.setAttribute("rel", "noopener noreferrer");
+        });
         descEl.style.display = "block";
       } else {
         descEl.style.display = "none";
