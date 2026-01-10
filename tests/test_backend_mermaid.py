@@ -40,13 +40,13 @@ class TestMermaidExporter:
         """Test correct shapes for each node type."""
         output = MermaidExporter.to_mermaid(simple_chart)
         
-        # Start/End use stadium shape: (["..."])
-        assert 'A(["Start"])' in output
-        assert 'D(["Stop"])' in output
+        # Start/End use stadium shape with icons: (["▶..."])
+        assert 'A(["▶ Start"])' in output
+        assert 'D(["⏹ Stop"])' in output
         # Process uses rectangle: ["..."]
         assert 'B["Proc"]' in output
-        # Decision uses rhombus: {"..."}
-        assert 'C{"Decide"}' in output
+        # Decision uses rhombus with icon: {"◆ ..."}
+        assert 'C{"◆ Decide"}' in output
     
     def test_edge_with_label(self):
         """Test edges with labels."""
@@ -179,10 +179,13 @@ def test_mermaid_shapes():
     
     output = MermaidExporter.to_mermaid(chart)
     
-    assert 'A(["Start"])' in output
+    # Start/End use stadium shape with icons
+    assert 'A(["▶ Start"])' in output
+    assert 'D(["⏹ Stop"])' in output
+    # Process uses rectangle
     assert 'B["Proc"]' in output
-    assert 'C{"Disc"}' in output
-    assert 'D(["Stop"])' in output
+    # Decision uses rhombus with icon
+    assert 'C{"◆ Disc"}' in output
 
 
 def test_mermaid_edges_with_labels():

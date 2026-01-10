@@ -1,3 +1,37 @@
+/* Chart boundary outlines for multi-chart visualization */
+.chart-boundary {
+    fill: transparent;
+    stroke: rgba(91, 95, 199, 0.25);
+    stroke-width: 2;
+    stroke-dasharray: 8, 4;
+    pointer-events: none;
+}
+
+.chart-boundary.main-chart {
+    stroke: rgba(45, 156, 111, 0.35);
+}
+
+.chart-boundary.subflow-chart {
+    stroke: rgba(91, 95, 199, 0.25);
+}
+
+/* Chart labels inside boundaries */
+text.chart-label {
+    font-family: var(--font-family);
+    font-size: 16px;
+    font-weight: 600;
+    fill: var(--text-secondary);
+    pointer-events: none;
+}
+
+text.chart-label.main-chart {
+    fill: rgba(45, 156, 111, 0.8);
+}
+
+text.chart-label.subflow-chart {
+    fill: rgba(91, 95, 199, 0.7);
+}
+
 /* ============================================
    FlowPlay - Interactive Flowchart Visualizer
    Refined Dark Mode - Professional & Compact
@@ -354,7 +388,7 @@ body {
 /* Glow for main overlay (current node in normal mode) */
 #node-overlay:not(.hidden) {
     border-color: rgba(91, 95, 199, 0.8);
-    box-shadow: 
+    box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.6),
         0 0 20px 5px rgba(91, 95, 199, 0.5);
 }
@@ -1539,11 +1573,11 @@ body {
         min-width: 44px;
         min-height: 44px;
     }
-    
+
     .edge-btn {
         min-height: 44px;
     }
-    
+
     #mini-map {
         width: 120px;
         height: 80px;
@@ -1591,11 +1625,11 @@ body {
 }
 
 @keyframes modalSlideIn {
-    from { 
+    from {
         opacity: 0;
         transform: scale(0.95) translateY(-10px);
     }
-    to { 
+    to {
         opacity: 1;
         transform: scale(1) translateY(0);
     }
@@ -1780,7 +1814,7 @@ body.light-mode .node-overlay {
 /* Glow for main overlay in light mode */
 body.light-mode #node-overlay:not(.hidden) {
     border-color: rgba(91, 95, 199, 0.6);
-    box-shadow: 
+    box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.15),
         0 0 20px 5px rgba(91, 95, 199, 0.35);
 }
@@ -1788,7 +1822,7 @@ body.light-mode #node-overlay:not(.hidden) {
 /* Glow for current expanded overlay in light mode */
 body.light-mode .expanded-node-overlay.current {
     border-color: rgba(91, 95, 199, 0.6);
-    box-shadow: 
+    box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.15),
         0 0 20px 5px rgba(91, 95, 199, 0.35);
 }
@@ -1971,11 +2005,11 @@ body.no-edge-animation .edge-path[style*="stroke-dasharray"] {
 }
 
 @keyframes slideDown {
-    from { 
+    from {
         opacity: 0;
         transform: translateY(-20px) scale(0.98);
     }
-    to { 
+    to {
         opacity: 1;
         transform: translateY(0) scale(1);
     }
@@ -2139,7 +2173,7 @@ body.light-mode .command-item:hover {
 .expanded-node-overlay.current {
     z-index: 60;
     border-color: rgba(91, 95, 199, 0.8);
-    box-shadow: 
+    box-shadow:
         0 8px 32px rgba(0, 0, 0, 0.6),
         0 0 20px 5px rgba(91, 95, 199, 0.5);
 }
@@ -2177,4 +2211,22 @@ body.always-expand-nodes #node-overlay {
 /* Hide collapsed nodes when in always-expand mode */
 body.always-expand-nodes .node-collapsed {
     opacity: 0 !important;
+}
+
+/* ============================================
+   Hide Data Caches Mode
+   ============================================ */
+
+/* Hide cache sections in node overlays */
+body.hide-data-caches .overlay-cache {
+    display: none !important;
+}
+
+/* Hide the global cache toggle button and panel */
+body.hide-data-caches #global-cache-toggle {
+    display: none !important;
+}
+
+body.hide-data-caches #global-cache-panel {
+    display: none !important;
 }

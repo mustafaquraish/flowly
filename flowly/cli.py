@@ -12,57 +12,90 @@ import argparse
 import importlib.util
 import sys
 from pathlib import Path
-from typing import List, Tuple
+from typing import List, Tuple, Union
 
-from flowly.frontend.dsl import Flow
-from flowly.core.ir import FlowChart
+from flowly.backend.graphviz import GraphvizExporter
 from flowly.backend.html import HtmlExporter
 from flowly.backend.mermaid import MermaidExporter
-from flowly.backend.graphviz import GraphvizExporter
 from flowly.backend.svg import SvgExporter
+from flowly.core.ir import FlowChart, MultiFlowChart
 from flowly.core.serialization import JsonSerializer
+from flowly.frontend.dsl import FlowBuilder, SubflowBuilder
 
 
-def discover_flowcharts(filepath: Path) -> List[Tuple[str, FlowChart]]:
+def discover_flowcharts(
+    filepath: Path,
+) -> List[Tuple[str, Union[FlowChart, MultiFlowChart]]]:
     """
     Load a Python file and discover all Flow decorator instances at module level.
-    
+
+    If a Flow has referenced @Subflow decorators, returns a MultiFlowChart that
+    automatically combines the main flow with all its subflows.
+
     Returns a list of (name, flowchart) tuples.
     """
     # Load the module
     spec = importlib.util.spec_from_file_location("user_module", filepath)
     if spec is None or spec.loader is None:
         raise ImportError(f"Could not load {filepath}")
-    
+
     module = importlib.util.module_from_spec(spec)
-    
+
     # Add the file's directory to sys.path so imports work
     file_dir = str(filepath.parent.resolve())
     if file_dir not in sys.path:
         sys.path.insert(0, file_dir)
-    
+
     try:
         spec.loader.exec_module(module)
     except Exception as e:
         raise RuntimeError(f"Error executing {filepath}: {e}") from e
-    
+
     # Find all Flow decorator instances (they have a .chart attribute)
+    # Skip SubflowBuilder instances - they'll be included via their parent Flow
     flowcharts = []
+    subflow_charts = set()  # Track charts that are subflows (to exclude from top-level)
+
+    # First pass: collect all subflow chart IDs
     for name in dir(module):
         obj = getattr(module, name)
-        if isinstance(obj, Flow) and obj.chart is not None:
-            flowcharts.append((name, obj.chart))
-    
+        if isinstance(obj, FlowBuilder) and obj.chart is not None:
+            for subflow in obj._referenced_subflows:
+                if subflow.chart:
+                    subflow_charts.add(subflow.chart.id)
+
+    # Second pass: collect main flows (excluding pure subflows)
+    for name in dir(module):
+        obj = getattr(module, name)
+        if isinstance(obj, FlowBuilder) and obj.chart is not None:
+            # Skip if this is only used as a subflow (not a main flow)
+            if obj.chart.id in subflow_charts:
+                continue
+
+            # Check if this flow has referenced subflows
+            if obj._referenced_subflows:
+                # Use the multi_chart property which recursively collects all subflows
+                flowcharts.append((name, obj.multi_chart))
+            else:
+                # Simple flow with no subflows
+                flowcharts.append((name, obj.chart))
+
     return flowcharts
 
 
 def export_flowchart(
-    chart: FlowChart,
-    output_path: Path,
-    format: str
+    chart: Union[FlowChart, MultiFlowChart], output_path: Path, format: str
 ) -> Path:
-    """Export a flowchart to the specified format."""
+    """Export a flowchart to the specified format.
     
+    All formats support both FlowChart and MultiFlowChart:
+    - html: Interactive viewer with navigation
+    - mermaid: Mermaid.js diagram syntax (subgraphs for multi-chart)
+    - graphviz/dot: DOT language (cluster subgraphs for multi-chart)
+    - svg: Rendered vector graphics (clusters for multi-chart)
+    - json: Raw JSON serialization
+    """
+
     if format == "html":
         content = HtmlExporter.to_html(chart)
         ext = ".html"
@@ -76,19 +109,24 @@ def export_flowchart(
         content = SvgExporter.to_svg(chart)
         ext = ".svg"
     elif format == "json":
-        content = JsonSerializer.to_json(chart)
+        if isinstance(chart, MultiFlowChart):
+            content = JsonSerializer.multi_to_json(chart)
+        else:
+            content = JsonSerializer.to_json(chart)
         ext = ".json"
     else:
-        raise ValueError(f"Unknown format: {format}. Use: html, mermaid, graphviz, svg, json")
-    
+        raise ValueError(
+            f"Unknown format: {format}. Use: html, mermaid, graphviz, svg, json"
+        )
+
     # Create output filename
     # Sanitize the chart name for use as filename
     safe_name = chart.name.lower().replace(" ", "_").replace("/", "_")
     safe_name = "".join(c for c in safe_name if c.isalnum() or c == "_")
-    
+
     output_file = output_path / f"{safe_name}{ext}"
     output_file.write_text(content, encoding="utf-8")
-    
+
     return output_file
 
 
@@ -97,98 +135,106 @@ def main(argv: List[str] = None) -> int:
     parser = argparse.ArgumentParser(
         prog="flowly",
         description="Export flowcharts from Python files.",
-        epilog="Example: flowly ./examples/demo_dsl.py -o ./build/"
+        epilog="Example: flowly ./examples/demo_dsl.py -o ./build/",
     )
-    
+
     parser.add_argument(
-        "input",
-        type=Path,
-        help="Python file containing flowchart definitions"
+        "input", type=Path, help="Python file containing flowchart definitions"
     )
-    
+
     parser.add_argument(
-        "-o", "--output",
+        "-o",
+        "--output",
         type=Path,
         default=Path("."),
-        help="Output directory (default: current directory)"
+        help="Output directory (default: current directory)",
     )
-    
+
     parser.add_argument(
-        "-f", "--format",
+        "-f",
+        "--format",
         choices=["html", "mermaid", "graphviz", "dot", "svg", "json"],
         default="html",
-        help="Output format (default: html)"
+        help="Output format (default: html)",
     )
-    
+
     parser.add_argument(
-        "-l", "--list",
+        "-l",
+        "--list",
         action="store_true",
-        help="List flowcharts in file without exporting"
+        help="List flowcharts in file without exporting",
     )
-    
+
     parser.add_argument(
-        "-n", "--name",
+        "-n",
+        "--name",
         type=str,
-        help="Export only the flowchart with this variable name"
+        help="Export only the flowchart with this variable name",
     )
-    
-    parser.add_argument(
-        "-v", "--verbose",
-        action="store_true",
-        help="Verbose output"
-    )
-    
+
+    parser.add_argument("-v", "--verbose", action="store_true", help="Verbose output")
+
     args = parser.parse_args(argv)
-    
+
     # Validate input file
     if not args.input.exists():
         print(f"Error: File not found: {args.input}", file=sys.stderr)
         return 1
-    
+
     if not args.input.is_file():
         print(f"Error: Not a file: {args.input}", file=sys.stderr)
         return 1
-    
+
     # Discover flowcharts
     try:
         flowcharts = discover_flowcharts(args.input)
     except Exception as e:
         print(f"Error loading file: {e}", file=sys.stderr)
         return 1
-    
+
     if not flowcharts:
         print(f"No flowcharts found in {args.input}", file=sys.stderr)
         return 1
-    
+
     # List mode
     if args.list:
         print(f"Flowcharts in {args.input}:")
         for name, chart in flowcharts:
-            print(f"  {name}: \"{chart.name}\" ({len(chart.nodes)} nodes, {len(chart.edges)} edges)")
+            if isinstance(chart, MultiFlowChart):
+                print(
+                    f'  {name}: "{chart.name}" (MultiFlowChart with {len(chart.charts)} charts)'
+                )
+            else:
+                print(
+                    f'  {name}: "{chart.name}" ({len(chart.nodes)} nodes, {len(chart.edges)} edges)'
+                )
         return 0
-    
+
     # Filter by name if specified
     if args.name:
         flowcharts = [(n, c) for n, c in flowcharts if n == args.name]
         if not flowcharts:
             print(f"Error: No flowchart named '{args.name}' found", file=sys.stderr)
             return 1
-    
+
     # Create output directory
     args.output.mkdir(parents=True, exist_ok=True)
-    
+
     # Export each flowchart
     for name, chart in flowcharts:
         try:
             output_file = export_flowchart(chart, args.output, args.format)
             if args.verbose:
-                print(f"Exported '{chart.name}' -> {output_file}")
+                if isinstance(chart, MultiFlowChart):
+                    print(f"Exported '{chart.name}' (multi-chart) -> {output_file}")
+                else:
+                    print(f"Exported '{chart.name}' -> {output_file}")
             else:
                 print(f"{output_file}")
         except Exception as e:
             print(f"Error exporting {name}: {e}", file=sys.stderr)
             return 1
-    
+
     return 0
 
 

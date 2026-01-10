@@ -11,7 +11,7 @@ dependencies = ["graphviz", "importlib_resources>=5.0; python_version < '3.9'"]
 requires-python = ">=3.8"
 
 [project.optional-dependencies]
-dev = ["pytest", "mypy", "black", "flake8"]
+dev = ["pytest", "pytest-xdist", "mypy", "black", "flake8"]
 
 [project.scripts]
 flowly = "flowly.cli:main"
@@ -19,6 +19,18 @@ flowly = "flowly.cli:main"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = "test_*.py"
+# Run e2e tests last since they are slow (browser tests)
+# Tests are ordered alphabetically by default - renamed test_e2e.py to test_zz_e2e.py
+# Using markers to separate slow tests
+markers = [
+    "slow: marks tests as slow (e.g., e2e tests)",
+]
+# Filter out deprecation warnings from third-party packages
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+# Disable random ordering plugin if present; use -n auto for parallel execution
+addopts = "-p no:randomly"
 
 [tool.setuptools.packages.find]
 include = ["flowly*"]

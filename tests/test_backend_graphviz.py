@@ -31,11 +31,11 @@ class TestGraphvizExporter:
         assert dot.name == "TestGraph"
         
         source = dot.source
-        assert 'label=Start' in source
-        assert 'label=Proc' in source
+        assert 'Start' in source  # Node label (with icon prefix)
+        assert 'Proc' in source
         assert 'label=Go' in source
         assert 'shape=ellipse' in source  # Start/End
-        assert 'shape=box' in source  # Process
+        assert 'shape=box' in source  # Process and Decision (with indicator)
     
     def test_to_digraph_shapes(self, simple_chart):
         """Test that node types get correct shapes."""
@@ -44,10 +44,10 @@ class TestGraphvizExporter:
         
         # Start and End use ellipse
         assert 'shape=ellipse' in source
-        # Process uses box
+        # Process and Decision use box (with indicator in label)
         assert 'shape=box' in source
-        # Decision uses diamond
-        assert 'shape=diamond' in source
+        # Decision uses ◆ indicator in label
+        assert '"◆ ' in source
     
     def test_to_dot_returns_string(self, simple_chart):
         """Test that to_dot() returns DOT source as a string."""
@@ -185,8 +185,8 @@ def test_to_digraph_structure():
     assert dot.name == "TestGraph"
     
     source = dot.source
-    assert 'label=Start' in source
-    assert 'label=Proc' in source
+    assert 'Start' in source  # Node label (with icon prefix)
+    assert 'Proc' in source
     assert 'label=Go' in source
     assert 'shape=ellipse' in source
     assert 'shape=box' in source
@@ -197,7 +197,9 @@ def test_decision_shape():
     d = chart.add_node(DecisionNode(label="?"))
     
     dot = GraphvizExporter.to_digraph(chart)
-    assert 'shape=diamond' in dot.source
+    # Decisions now use box shape with ◆ indicator in label (to avoid stretched diamonds)
+    assert 'shape=box' in dot.source
+    assert '"◆ ?"' in dot.source
 
 
 class TestGraphvizMarkdownRendering:

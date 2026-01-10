@@ -90,6 +90,7 @@ const SettingsManager = {
     autoHideControls: true,
     autoSaveState: true,
     alwaysExpandNodes: false,
+    hideDataCaches: false,
     defaultZoomLevel: 2.0,
   },
 
@@ -193,6 +194,12 @@ const CommandPalette = {
       category: "Display",
       settingKey: "alwaysExpandNodes",
     },
+    {
+      id: "toggle-hide-caches",
+      label: "Toggle Hide Data Caches",
+      category: "Display",
+      settingKey: "hideDataCaches",
+    },
     // Actions with shortcuts
     {
       id: "restart",
@@ -262,6 +269,13 @@ const CommandPalette = {
       category: "Navigation",
       action: "openNodeSearch",
       shortcut: "⌘P",
+    },
+    {
+      id: "go-subflow-start",
+      label: "Go to Current Subflow Start",
+      category: "Navigation",
+      action: "goToSubflowStart",
+      shortcut: "S",
     },
   ],
 
@@ -736,8 +750,11 @@ const CommandPalette = {
           case "openFile":
             this.app.openFile();
             break;
-          case "openNodeSearch":
+case "openNodeSearch":
             setTimeout(() => this.open("nodes"), 50);
+            break;
+          case "goToSubflowStart":
+            this.app.goToSubflowStart();
             break;
         }
       }
@@ -779,6 +796,9 @@ const FlowState = {
     this.flowData = flowData;
     this.nodes = {};
     this.edges = {};
+    this.isMultiChart = false;
+    this.multiChartData = null;
+    this.currentChartId = null;
 
     flowData.nodes.forEach((node) => {
       this.nodes[node.id] = node;
@@ -787,6 +807,88 @@ const FlowState = {
       this.edges[edge.id] = edge;
     });
     this.graph = flowData.graph;
+  },
+
+  /**
+   * Initialize state from MultiFlowChart data
+   * Loads the main chart first, but keeps all charts available for navigation
+   */
+  initMultiChart(multiChartData) {
+    this.isMultiChart = true;
+    this.multiChartData = multiChartData;
+    this.allCharts = multiChartData.charts;
+
+    // Load the main chart
+    const mainChartId = multiChartData.mainChartId;
+    this.currentChartId = mainChartId;
+    const mainChart = multiChartData.charts[mainChartId];
+
+    if (!mainChart) {
+      throw new Error(`Main chart '${mainChartId}' not found in MultiFlowChart`);
+    }
+
+    // Initialize with the main chart's data
+    this.flowData = mainChart;
+    this.nodes = {};
+    this.edges = {};
+
+    // Merge nodes, edges, and graph data from ALL charts
+    // This allows navigation to work across all charts
+    this.graph = { incomingEdges: {}, outgoingEdges: {} };
+
+    Object.values(multiChartData.charts).forEach((chart) => {
+      // Merge nodes
+      chart.nodes.forEach((node) => {
+        this.nodes[node.id] = node;
+      });
+      // Merge edges
+      chart.edges.forEach((edge) => {
+        this.edges[edge.id] = edge;
+      });
+      // Merge graph lookups
+      if (chart.graph) {
+        Object.entries(chart.graph.incomingEdges || {}).forEach(([nodeId, edgeIds]) => {
+          if (!this.graph.incomingEdges[nodeId]) {
+            this.graph.incomingEdges[nodeId] = [];
+          }
+          this.graph.incomingEdges[nodeId].push(...edgeIds);
+        });
+        Object.entries(chart.graph.outgoingEdges || {}).forEach(([nodeId, edgeIds]) => {
+          if (!this.graph.outgoingEdges[nodeId]) {
+            this.graph.outgoingEdges[nodeId] = [];
+          }
+          this.graph.outgoingEdges[nodeId].push(...edgeIds);
+        });
+      }
+    });
+  },
+
+  /**
+   * Switch to a different chart in a MultiFlowChart
+   * @param {string} chartId - The ID of the chart to switch to
+   * @returns {Object} The chart data, or null if not found
+   */
+  switchChart(chartId) {
+    if (!this.isMultiChart || !this.allCharts || !this.allCharts[chartId]) {
+      return null;
+    }
+
+    this.currentChartId = chartId;
+    const chart = this.allCharts[chartId];
+
+    this.flowData = chart;
+    this.nodes = {};
+    this.edges = {};
+
+    chart.nodes.forEach((node) => {
+      this.nodes[node.id] = node;
+    });
+    chart.edges.forEach((edge) => {
+      this.edges[edge.id] = edge;
+    });
+    this.graph = chart.graph;
+
+    return chart;
   },
 
   /**
@@ -1054,6 +1156,7 @@ class FlowPlay {
     this.autoHideTimeout = null;
     this.zoomTrackTimeout = null;
     this.lastInteractionTime = Date.now();
+    this._lastFitMode = null; // Track fit view toggle state ('subflow' or 'all')
 
     // Load settings
     this.settings = SettingsManager.load();
@@ -1169,11 +1272,26 @@ class FlowPlay {
       throw new Error(errorMessage);
     }
 
-    // Initialize state with flow data
-    FlowState.init(flowData);
-
-    // Set title
-    document.getElementById("flowchart-name").textContent = flowData.name;
+    // Always use initMultiChart for unified handling
+    // Single FlowCharts are wrapped as MultiFlowChart with one chart
+    if (flowData.type === "MultiFlowChart") {
+      FlowState.initMultiChart(flowData);
+      document.getElementById("flowchart-name").textContent = flowData.name;
+    } else {
+      // Wrap single flowchart as MultiFlowChart for unified handling
+      const chartId = flowData.name.replace(/\s+/g, '_').toLowerCase();
+      const wrappedData = {
+        type: "MultiFlowChart",
+        name: flowData.name,
+        metadata: flowData.metadata || {},
+        mainChartId: chartId,
+        charts: {
+          [chartId]: { ...flowData, id: chartId }
+        }
+      };
+      FlowState.initMultiChart(wrappedData);
+      document.getElementById("flowchart-name").textContent = flowData.name;
+    }
   }
 
   setupSVG() {
@@ -1271,109 +1389,226 @@ class FlowPlay {
   }
 
   renderFlowchart() {
-    // Use Dagre for proper hierarchical DAG layout (like Graphviz/Mermaid)
-    const g = new dagre.graphlib.Graph();
+    // For MultiFlowChart, we render ALL charts on the same canvas with offsets
+    // Each chart is laid out separately, then positioned with an offset
+    const allCharts = FlowState.isMultiChart ? Object.values(FlowState.allCharts) : [this.flowData];
 
-    // Set graph properties - top-to-bottom layout (vertical)
-    g.setGraph({
-      rankdir: "LR", // Left to right
-      nodesep: 200 * 2, // Horizontal separation between nodes (increased for spread)
-      ranksep: 200 * 2, // Vertical separation between ranks
-      marginx: 50,
-      marginy: 50,
+    // Compute layouts for all charts and track accumulated offset
+    let currentYOffset = 0;
+    const chartLayouts = [];
+    const CHART_SPACING = 400; // Vertical space between charts
+
+    allCharts.forEach((chartData, chartIndex) => {
+      const g = new dagre.graphlib.Graph();
+
+      // Set graph properties - top-to-bottom layout (vertical)
+      g.setGraph({
+        rankdir: "LR", // Left to right
+        nodesep: 200 * 2, // Horizontal separation between nodes (increased for spread)
+        ranksep: 200 * 2, // Vertical separation between ranks
+        marginx: 50,
+        marginy: 50,
+      });
+
+      // Default edge label (required by Dagre)
+      g.setDefaultEdgeLabel(() => ({}));
+
+      // Add nodes to the graph
+      chartData.nodes.forEach((node) => {
+        g.setNode(node.id, {
+          width: this.nodeWidth,
+          height: this.nodeHeight,
+          label: node.label,
+        });
+      });
+
+      // Add edges to the graph
+      chartData.edges.forEach((edge) => {
+        g.setEdge(edge.source, edge.target);
+      });
+
+      // Compute the layout
+      dagre.layout(g);
+
+      // Find bounds for this chart
+      let minY = Infinity, maxY = -Infinity;
+      chartData.nodes.forEach((node) => {
+        const dagreNode = g.node(node.id);
+        if (dagreNode.y < minY) minY = dagreNode.y;
+        if (dagreNode.y > maxY) maxY = dagreNode.y;
+      });
+
+      // Apply Y offset and copy positions back to our global nodes index
+      chartData.nodes.forEach((node) => {
+        const dagreNode = g.node(node.id);
+        const yWithOffset = dagreNode.y + currentYOffset;
+
+        // Ensure this node is in FlowState.nodes (might be from a subflow)
+        if (!FlowState.nodes[node.id]) {
+          FlowState.nodes[node.id] = { ...node };
+        }
+        FlowState.nodes[node.id].x = dagreNode.x;
+        FlowState.nodes[node.id].y = yWithOffset;
+        this.nodes[node.id] = FlowState.nodes[node.id];
+      });
+
+      // Also ensure edges are in FlowState.edges
+      chartData.edges.forEach((edge) => {
+        if (!FlowState.edges[edge.id]) {
+          FlowState.edges[edge.id] = edge;
+        }
+        this.edges[edge.id] = FlowState.edges[edge.id];
+      });
+
+      chartLayouts.push({
+        chartId: chartData.id,
+        chartName: chartData.name,
+        yOffset: currentYOffset,
+        graph: g,
+        nodes: chartData.nodes,
+        edges: chartData.edges,
+      });
+
+      // Update offset for next chart
+      const chartHeight = maxY - minY + this.nodeHeight * 2;
+      currentYOffset += chartHeight + CHART_SPACING;
     });
 
-    // Default edge label (required by Dagre)
-    g.setDefaultEdgeLabel(() => ({}));
+    // Store chart layouts for later reference (e.g., jumping to a chart)
+    this.chartLayouts = chartLayouts;
 
-    // Add nodes to the graph
-    this.flowData.nodes.forEach((node) => {
-      g.setNode(node.id, {
-        width: this.nodeWidth,
-        height: this.nodeHeight,
-        label: node.label,
+    // Draw edges for ALL charts
+    const edgeGroup = this.g.append("g").attr("class", "edges");
+
+    // Draw edges from all charts using the positioned nodes
+    chartLayouts.forEach((layout) => {
+      layout.edges.forEach((edge) => {
+        // Skip hidden edges (cross-chart navigation edges that shouldn't be rendered)
+        if (edge.metadata?.hidden) {
+          return;
+        }
+
+        const source = this.nodes[edge.source];
+        const target = this.nodes[edge.target];
+
+        if (!source || !target) {
+          console.warn(`Edge ${edge.id} references missing nodes: ${edge.source} -> ${edge.target}`);
+          return;
+        }
+
+        // Calculate edge path
+        const path = this.calculateEdgePath(source, target);
+
+        // Create invisible wider hit area for easier clicking
+        edgeGroup
+          .append("path")
+          .attr("class", "edge-hit-area")
+          .attr("id", `edge-hit-${edge.id}`)
+          .attr("d", path)
+          .datum(edge)
+          .style("cursor", "pointer")
+          .style("stroke", "transparent")
+          .style("stroke-width", "20")
+          .style("fill", "none")
+          .style("pointer-events", "stroke")
+          .on("click", (event) => {
+            event.stopPropagation();
+            this.handleEdgeClick(edge);
+          })
+          .on("mouseenter", (event) => {
+            this.handleEdgeHover(edge, event, true);
+          })
+          .on("mousemove", (event) => {
+            this.updateTooltipPosition(event);
+          })
+          .on("mouseleave", () => {
+            this.handleEdgeHover(edge, null, false);
+          });
+
+        // Visible edge path
+        edgeGroup
+          .append("path")
+          .attr("class", "edge-path")
+          .attr("id", `edge-${edge.id}`)
+          .attr("d", path)
+          .attr("marker-end", "url(#arrow)")
+          .datum(edge)
+          .style("pointer-events", "none");
+
+        // Edge label
+        if (edge.label) {
+          const midX = (source.x + target.x) / 2;
+          const midY = (source.y + target.y) / 2;
+
+          edgeGroup
+            .append("text")
+            .attr("class", "edge-label")
+            .attr("x", midX)
+            .attr("y", midY - 8)
+            .attr("text-anchor", "middle")
+            .text(edge.label);
+        }
       });
     });
 
-    // Add edges to the graph
-    this.flowData.edges.forEach((edge) => {
-      g.setEdge(edge.source, edge.target);
-    });
+    // Draw nodes from ALL charts
+    const nodeGroup = this.g.append("g").attr("class", "nodes");
 
-    // Compute the layout
-    dagre.layout(g);
-
-    // Copy positions back to our nodes index
-    this.flowData.nodes.forEach((node) => {
-      const dagreNode = g.node(node.id);
-      this.nodes[node.id].x = dagreNode.x;
-      this.nodes[node.id].y = dagreNode.y;
-    });
-
-    // Draw edges
-    const edgeGroup = this.g.append("g").attr("class", "edges");
-
-    // Draw edges using the positioned nodes - make them clickable
-    this.flowData.edges.forEach((edge) => {
-      const source = this.nodes[edge.source];
-      const target = this.nodes[edge.target];
-
-      // Calculate edge path
-      const path = this.calculateEdgePath(source, target);
-
-      // Create invisible wider hit area for easier clicking
-      edgeGroup
-        .append("path")
-        .attr("class", "edge-hit-area")
-        .attr("id", `edge-hit-${edge.id}`)
-        .attr("d", path)
-        .datum(edge)
-        .style("cursor", "pointer")
-        .style("stroke", "transparent")
-        .style("stroke-width", "20")
-        .style("fill", "none")
-        .style("pointer-events", "stroke")
-        .on("click", (event) => {
-          event.stopPropagation();
-          this.handleEdgeClick(edge);
-        })
-        .on("mouseenter", (event) => {
-          this.handleEdgeHover(edge, event, true);
-        })
-        .on("mousemove", (event) => {
-          this.updateTooltipPosition(event);
-        })
-        .on("mouseleave", () => {
-          this.handleEdgeHover(edge, null, false);
+    // Draw chart outlines and labels for multi-chart
+    if (FlowState.isMultiChart && chartLayouts.length > 1) {
+      // Create a group for chart boundaries (drawn behind nodes)
+      const boundaryGroup = this.g.insert("g", ".edges").attr("class", "chart-boundaries");
+      
+      chartLayouts.forEach((layout, index) => {
+        // Find bounds of this chart
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        
+        layout.nodes.forEach((node) => {
+          const n = this.nodes[node.id];
+          if (n) {
+            if (n.x - this.nodeWidth / 2 < minX) minX = n.x - this.nodeWidth / 2;
+            if (n.x + this.nodeWidth / 2 > maxX) maxX = n.x + this.nodeWidth / 2;
+            if (n.y - this.nodeHeight / 2 < minY) minY = n.y - this.nodeHeight / 2;
+            if (n.y + this.nodeHeight / 2 > maxY) maxY = n.y + this.nodeHeight / 2;
+          }
         });
 
-      // Visible edge path
-      edgeGroup
-        .append("path")
-        .attr("class", "edge-path")
-        .attr("id", `edge-${edge.id}`)
-        .attr("d", path)
-        .attr("marker-end", "url(#arrow)")
-        .datum(edge)
-        .style("pointer-events", "none");
+        // Skip if no valid nodes
+        if (minX === Infinity) return;
 
-      // Edge label
-      if (edge.label) {
-        const midX = (source.x + target.x) / 2;
-        const midY = (source.y + target.y) / 2;
+        // Add padding around the chart boundary
+        const padding = 60;
+        const labelHeight = 30;
+        minX -= padding;
+        maxX += padding;
+        minY -= padding + labelHeight;
+        maxY += padding;
 
-        edgeGroup
+        const width = maxX - minX;
+        const height = maxY - minY;
+
+        // Chart boundary rectangle
+        boundaryGroup
+          .append("rect")
+          .attr("class", `chart-boundary ${index === 0 ? 'main-chart' : 'subflow-chart'}`)
+          .attr("id", `chart-boundary-${layout.chartId}`)
+          .attr("x", minX)
+          .attr("y", minY)
+          .attr("width", width)
+          .attr("height", height)
+          .attr("rx", 16);
+
+        // Chart label at top-left inside the boundary
+        boundaryGroup
           .append("text")
-          .attr("class", "edge-label")
-          .attr("x", midX)
-          .attr("y", midY - 8)
-          .attr("text-anchor", "middle")
-          .text(edge.label);
-      }
-    });
-
-    // Draw nodes using our updated nodes index
-    const nodeGroup = this.g.append("g").attr("class", "nodes");
+          .attr("class", `chart-label ${index === 0 ? 'main-chart' : 'subflow-chart'}`)
+          .attr("x", minX + 16)
+          .attr("y", minY + 22)
+          .attr("text-anchor", "start")
+          .text(index === 0 ? `🏠 ${layout.chartName}` : `📋 ${layout.chartName}`);
+      });
+    }
 
     Object.values(this.nodes).forEach((node) => {
       const g = nodeGroup
@@ -1414,6 +1649,17 @@ class FlowPlay {
           .append("polygon")
           .attr("class", `node-shape ${node.type}`)
           .attr("points", `0,-${size} ${size * 2},0 0,${size} -${size * 2},0`);
+      } else if (node.type === "SubFlowNode") {
+        // SubFlowNode: styled differently to indicate it links to another chart
+        collapsedGroup
+          .append("rect")
+          .attr("class", `node-shape ${node.type}`)
+          .attr("x", -this.nodeWidth / 2)
+          .attr("y", -this.nodeHeight / 2)
+          .attr("width", this.nodeWidth)
+          .attr("height", this.nodeHeight)
+          .attr("rx", 10)
+          .style("stroke-dasharray", "5,3");
       } else {
         collapsedGroup
           .append("rect")
@@ -2616,6 +2862,15 @@ class FlowPlay {
     // Reset keyboard edge selection to first edge
     this.selectedEdgeIndex = 0;
 
+    // Reset fit view toggle when navigating to a different chart
+    if (prevNode && FlowState.isMultiChart && this.chartLayouts) {
+      const prevChartId = this._getChartIdForNode(prevNode.id);
+      const newChartId = this._getChartIdForNode(node.id);
+      if (prevChartId !== newChartId) {
+        this._lastFitMode = null;
+      }
+    }
+
     // Hide main overlay during transition (only used when not in always-expand mode)
     if (!this.settings.alwaysExpandNodes) {
       document.getElementById("node-overlay").classList.add("hidden");
@@ -2974,7 +3229,7 @@ class FlowPlay {
 
       // Save state to localStorage after each edit
       FlowState.saveToStorage();
-      
+
       // Update global cache toggle count
       this.updateGlobalCacheToggle();
 
@@ -3234,22 +3489,74 @@ class FlowPlay {
     }
   }
 
+  /**
+   * Fit view - toggles between fitting current subflow and fitting all subflows.
+   * First press: fit current subflow (or all if not in a subflow)
+   * Second press: fit all subflows
+   */
   fitToView() {
+    // If we're in a multi-chart layout and have a current node, implement toggle behavior
+    if (FlowState.isMultiChart && this.chartLayouts && this.chartLayouts.length > 1 && this.currentNode) {
+      // Find current chart
+      let currentChartLayout = null;
+      for (const layout of this.chartLayouts) {
+        const nodeInChart = layout.nodes.find(n => n.id === this.currentNode.id);
+        if (nodeInChart) {
+          currentChartLayout = layout;
+          break;
+        }
+      }
+
+      // Toggle logic: if last fit was current subflow, fit all; otherwise fit current subflow
+      if (this._lastFitMode === 'subflow' && currentChartLayout) {
+        // Fit all
+        this._lastFitMode = 'all';
+        this._fitToNodes(Object.values(this.nodes));
+      } else if (currentChartLayout) {
+        // Fit current subflow
+        this._lastFitMode = 'subflow';
+        // Get positioned nodes from the layout
+        const chartNodes = currentChartLayout.nodes.map(n => this.nodes[n.id]).filter(Boolean);
+        this._fitToNodes(chartNodes);
+      } else {
+        // No current chart found, fit all
+        this._lastFitMode = 'all';
+        this._fitToNodes(Object.values(this.nodes));
+      }
+    } else {
+      // Single chart or no current node - just fit all
+      this._lastFitMode = 'all';
+      this._fitToNodes(Object.values(this.nodes));
+    }
+  }
+
+  /**
+   * Fit the view to contain the specified nodes
+   * @param {Array} nodes - Array of node objects with x, y coordinates
+   */
+  _fitToNodes(nodes) {
+    if (!nodes || nodes.length === 0) return;
+
     const container = document.getElementById("flowchart-container");
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Get bounds of all nodes
+    // Get bounds of specified nodes
     let minX = Infinity,
       minY = Infinity,
       maxX = -Infinity,
       maxY = -Infinity;
-    this.flowData.nodes.forEach((node) => {
-      minX = Math.min(minX, node.x - this.nodeWidth);
-      minY = Math.min(minY, node.y - this.nodeHeight);
-      maxX = Math.max(maxX, node.x + this.nodeWidth);
-      maxY = Math.max(maxY, node.y + this.nodeHeight);
+    
+    nodes.forEach((node) => {
+      if (node.x !== undefined && node.y !== undefined) {
+        minX = Math.min(minX, node.x - this.nodeWidth);
+        minY = Math.min(minY, node.y - this.nodeHeight);
+        maxX = Math.max(maxX, node.x + this.nodeWidth);
+        maxY = Math.max(maxY, node.y + this.nodeHeight);
+      }
     });
+
+    if (minX === Infinity) return; // No valid nodes
 
     const graphWidth = maxX - minX;
     const graphHeight = maxY - minY;
@@ -3358,7 +3665,7 @@ class FlowPlay {
 
     // Input event delegation - only commit changes on blur
     container.addEventListener("blur", (e) => {
-      if (!e.target.classList.contains("cache-key") && 
+      if (!e.target.classList.contains("cache-key") &&
           !e.target.classList.contains("cache-value")) return;
 
       const row = e.target.closest(".cache-row");
@@ -3654,6 +3961,12 @@ class FlowPlay {
       !this.settings.animatedEdges
     );
 
+    // Hide data caches
+    document.body.classList.toggle(
+      "hide-data-caches",
+      this.settings.hideDataCaches
+    );
+
     // Auto-hide controls
     const controls = document.getElementById("controls");
     if (controls) {
@@ -3678,12 +3991,63 @@ class FlowPlay {
     }
   }
 
-  setSetting(key, value) {
+setSetting(key, value) {
     if (this.settings.hasOwnProperty(key)) {
       this.settings[key] = value;
       SettingsManager.save(this.settings);
       this.applySettings();
     }
+  }
+
+  /**
+   * Navigate to the start node of the current subflow (chart)
+   * In a multi-chart flowchart, this finds which chart the current node belongs to
+   * and navigates to that chart's start node
+   */
+  goToSubflowStart() {
+    if (!this.currentNode) return;
+
+    // Find which chart the current node belongs to
+    let currentChartId = null;
+    let startNode = null;
+
+    if (FlowState.isMultiChart && this.chartLayouts) {
+      // Multi-chart: find the chart containing the current node
+      for (const layout of this.chartLayouts) {
+        const nodeInChart = layout.nodes.find(n => n.id === this.currentNode.id);
+        if (nodeInChart) {
+          currentChartId = layout.chartId;
+          // Find the start node of this chart
+          startNode = layout.nodes.find(n => n.type === "StartNode");
+          break;
+        }
+      }
+    }
+
+    // Fallback to global start node if not in multi-chart or chart not found
+    if (!startNode) {
+      startNode = FlowState.getStartNode();
+    }
+
+    if (startNode && startNode.id !== this.currentNode.id) {
+      this.navigateToNode(startNode.id);
+    }
+  }
+
+  /**
+   * Get the chart ID for a given node ID
+   * @param {string} nodeId - The node ID to look up
+   * @returns {string|null} The chart ID, or null if not found
+   */
+  _getChartIdForNode(nodeId) {
+    if (!FlowState.isMultiChart || !this.chartLayouts) return null;
+    
+    for (const layout of this.chartLayouts) {
+      if (layout.nodes.find(n => n.id === nodeId)) {
+        return layout.chartId;
+      }
+    }
+    return null;
   }
 }
 

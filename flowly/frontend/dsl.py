@@ -28,21 +28,53 @@ Example:
         flow.step("Cleanup")  # Inline node for one-offs
 
     chart = my_flow.chart
+
+Subflows with Circular References:
+    The @Subflow decorator supports forward references and circular links.
+    Definition order doesn't matter - you can reference a flow before it's defined.
+
+    @Subflow("Process A")
+    def process_a(flow):
+        flow.step("Do A")
+        process_b()  # Forward reference - works even though process_b defined later
+
+    @Subflow("Process B")
+    def process_b(flow):
+        flow.step("Do B")
+        process_a()  # Back reference - creates circular link
+
+    @Flow("Main")
+    def main_flow(flow):
+        process_a()  # Enter the cycle
 """
 
 import textwrap
-from typing import Optional, Callable, List, Any
-from dataclasses import dataclass, field
 from contextlib import contextmanager
+from dataclasses import dataclass, field
+from typing import Any, Callable, Dict, List, Optional, Set, TYPE_CHECKING
 
 from flowly.core.ir import (
-    FlowChart, Node as IRNode, StartNode, EndNode,
-    ProcessNode, DecisionNode, Edge
+    DecisionNode,
+    Edge,
+    EndNode,
+    FlowChart,
+    MultiFlowChart,
+    Node as IRNode,
+    ProcessNode,
+    StartNode,
+    SubFlowNode as IRSubFlowNode,
 )
 
 
 # Registry for the current flow being built
 _current_flow: Optional["FlowContext"] = None
+
+# Global registry of all flow builders (for forward references)
+# Maps function name -> SubflowBuilder (populated at decoration time)
+_subflow_registry: Dict[str, "SubflowBuilder"] = {}
+
+# Track which FlowBuilder is currently building (for subflow reference tracking)
+_building_flow_builder: Optional["FlowBuilder"] = None
 
 
 @dataclass
@@ -52,6 +84,7 @@ class NodeDef:
 
     Create nodes at module level, then call them inside a @Flow function.
     """
+
     label: str
     description: Optional[str] = None
     metadata: dict = field(default_factory=dict)
@@ -88,7 +121,7 @@ class NodeDef:
     def _get_node_for_target(self, flowchart: FlowChart, target_id: str) -> ProcessNode:
         """
         Get an IR node that can have an outgoing edge to target_id.
-        
+
         If an existing node has no outgoing edges or already has an edge to target_id,
         return that node. Otherwise, create a new node.
         """
@@ -102,7 +135,7 @@ class NodeDef:
             if any(e.target_id == target_id for e in outgoing):
                 # Already has edge to this target - can reuse
                 return node
-        
+
         # No suitable existing node - create new one
         return self._create_new_node(flowchart)
 
@@ -126,6 +159,7 @@ class DecisionDef:
 
     Create decisions at module level, then use them in if/while inside @Flow.
     """
+
     label: str
     description: Optional[str] = None
     yes_label: str = "Yes"
@@ -192,10 +226,14 @@ class FlowContext:
         self._used_nodes: List[NodeDef | DecisionDef] = []
 
         # Decision context stack for tracking branches
-        self._decision_stack: List[tuple[DecisionDef, str, bool]] = []  # (def, label, negated)
+        self._decision_stack: List[tuple[DecisionDef, str, bool]] = (
+            []
+        )  # (def, label, negated)
 
         # Loop context stack for tracking while loops (for continue/break)
-        self._loop_stack: List[tuple[DecisionNode | None, DecisionDef | None, List]] = []  # (decision_node, decision_def, break_exits)
+        self._loop_stack: List[tuple[DecisionNode | None, DecisionDef | None, List]] = (
+            []
+        )  # (decision_node, decision_def, break_exits)
 
         # Track edges already created FROM a node to avoid duplicates from different branches
         # Key: (source_id, target_id), Value: edge_label
@@ -204,12 +242,12 @@ class FlowContext:
     def _resolve_exit_node(self, exit_item: tuple, target_id: str) -> IRNode:
         """
         Resolve an exit item to the appropriate IR node for connecting to target_id.
-        
+
         exit_item is either (IRNode, label) or (NodeDef, label).
         For NodeDef, we find or create an IR node that can have an edge to target_id.
         """
         exit_node_or_def, _ = exit_item
-        
+
         if isinstance(exit_node_or_def, NodeDef):
             # This is a reusable node - find the right IR node for this target
             return exit_node_or_def._get_node_for_target(self.flowchart, target_id)
@@ -240,6 +278,37 @@ class FlowContext:
 
         self._exits = [(node, None)]
         return node
+
+    def decision(
+        self,
+        label: str,
+        description: Optional[str] = None,
+        yes_label: str = "Yes",
+        no_label: str = "No",
+    ) -> bool:
+        """
+        Create an inline decision node (for one-off decisions).
+
+        Use this when you don't need to reuse the decision.
+        Works just like Decision() but defined inline.
+
+        Example:
+            if flow.decision("Is valid?"):
+                flow.step("Process")
+            else:
+                flow.step("Reject")
+        """
+        # Create an inline DecisionDef
+        inline_decision = DecisionDef(
+            label=label,
+            description=description,
+            yes_label=yes_label,
+            no_label=no_label,
+        )
+        # Add the decision node to the flow
+        self._add_decision_node(inline_decision)
+        # Return True so it works in if statements
+        return True
 
     def end(self, label: str = "End", description: Optional[str] = None) -> EndNode:
         """
@@ -301,6 +370,7 @@ class FlowBuilder:
         self.name = name
         self.chart: Optional[FlowChart] = None
         self._func: Optional[Callable] = None
+        self._referenced_subflows: List["SubflowBuilder"] = []
 
     def __call__(self, func: Callable) -> "FlowBuilder":
         """Decorate the flow function."""
@@ -355,7 +425,7 @@ class FlowBuilder:
 
         # Get source
         source = inspect.getsource(self._func)
-        source = textwrap.dedent(source)        # Parse AST
+        source = textwrap.dedent(source)  # Parse AST
         tree = ast.parse(source)
         func_def = tree.body[0]
 
@@ -371,9 +441,14 @@ class FlowBuilder:
         self.chart.add_node(start)
         ctx._exits = [(start, None)]
 
-        # Set global context
-        global _current_flow
+        # Save previous context for nested builds (e.g., when subflow A builds subflow B)
+        global _current_flow, _building_flow_builder
+        prev_flow = _current_flow
+        prev_builder = _building_flow_builder
+        
+        # Set global contexts for flow building and subflow tracking
         _current_flow = ctx
+        _building_flow_builder = self
 
         try:
             # Process the function body
@@ -385,7 +460,9 @@ class FlowBuilder:
                 self.chart.add_node(end)
                 ctx._connect_exits_to_target(end.id)
         finally:
-            _current_flow = None
+            # Restore previous context (important for nested builds)
+            _current_flow = prev_flow
+            _building_flow_builder = prev_builder
             # Reset all used nodes for potential reuse
             for node in ctx._used_nodes:
                 node._reset()
@@ -433,7 +510,9 @@ class FlowBuilder:
         if isinstance(call.func, ast.Name):
             # Simple name - look up in closure vars first, then function's globals
             func_name = call.func.id
-            func = self._closure_vars.get(func_name) or self._func.__globals__.get(func_name)
+            func = self._closure_vars.get(func_name) or self._func.__globals__.get(
+                func_name
+            )
 
             if func is None:
                 raise NameError(
@@ -471,7 +550,9 @@ class FlowBuilder:
             return node.value
         elif isinstance(node, ast.Name):
             # Check closure vars first, then globals
-            return self._closure_vars.get(node.id) or self._func.__globals__.get(node.id)
+            return self._closure_vars.get(node.id) or self._func.__globals__.get(
+                node.id
+            )
         elif isinstance(node, ast.Str):  # Python 3.7 compat
             return node.s
         else:
@@ -548,9 +629,12 @@ class FlowBuilder:
         is_infinite_loop = False
         if isinstance(while_stmt.test, ast.Constant) and while_stmt.test.value is True:
             is_infinite_loop = True
-        elif isinstance(while_stmt.test, ast.NameConstant) and while_stmt.test.value is True:
-            # Python 3.7 compatibility
-            is_infinite_loop = True
+        elif hasattr(ast, "NameConstant") and isinstance(
+            while_stmt.test, ast.NameConstant
+        ):
+            # Python 3.7 compatibility (ast.NameConstant deprecated in 3.8+)
+            if while_stmt.test.value is True:
+                is_infinite_loop = True
 
         if is_infinite_loop:
             # `while True` - create an implicit decision node for the loop point
@@ -562,7 +646,9 @@ class FlowBuilder:
             for exit_item in ctx._exits:
                 exit_node_or_def, edge_label = exit_item
                 if isinstance(exit_node_or_def, NodeDef):
-                    source_node = exit_node_or_def._get_node_for_target(self.chart, loop_node.id)
+                    source_node = exit_node_or_def._get_node_for_target(
+                        self.chart, loop_node.id
+                    )
                 else:
                     source_node = exit_node_or_def
                 edge = Edge(source_node.id, loop_node.id, label=edge_label)
@@ -580,7 +666,9 @@ class FlowBuilder:
             for exit_item in ctx._exits:
                 exit_node_or_def, _ = exit_item
                 if isinstance(exit_node_or_def, NodeDef):
-                    source_node = exit_node_or_def._get_node_for_target(self.chart, loop_node.id)
+                    source_node = exit_node_or_def._get_node_for_target(
+                        self.chart, loop_node.id
+                    )
                 else:
                     source_node = exit_node_or_def
                 edge = Edge(source_node.id, loop_node.id)
@@ -634,7 +722,9 @@ class FlowBuilder:
         for exit_item in ctx._exits:
             exit_node_or_def, _ = exit_item
             if isinstance(exit_node_or_def, NodeDef):
-                source_node = exit_node_or_def._get_node_for_target(self.chart, decision_node.id)
+                source_node = exit_node_or_def._get_node_for_target(
+                    self.chart, decision_node.id
+                )
             else:
                 source_node = exit_node_or_def
             edge = Edge(source_node.id, decision_node.id)
@@ -657,7 +747,9 @@ class FlowBuilder:
         for exit_item in ctx._exits:
             exit_node_or_def, edge_label = exit_item
             if isinstance(exit_node_or_def, NodeDef):
-                source_node = exit_node_or_def._get_node_for_target(self.chart, loop_node.id)
+                source_node = exit_node_or_def._get_node_for_target(
+                    self.chart, loop_node.id
+                )
             else:
                 source_node = exit_node_or_def
             edge = Edge(source_node.id, loop_node.id, label=edge_label)
@@ -682,3 +774,276 @@ class FlowBuilder:
 
 # Main decorator
 Flow = FlowBuilder
+
+
+# Add multi_chart property to FlowBuilder
+@property
+def _multi_chart(self: FlowBuilder) -> MultiFlowChart:
+    """
+    Get a MultiFlowChart containing this flow and all referenced subflows.
+
+    This recursively collects all subflows that are referenced (directly or indirectly)
+    from this flow and creates a MultiFlowChart with them.
+    """
+    if self.chart is None:
+        raise RuntimeError("FlowBuilder has not been built yet")
+
+    multi = MultiFlowChart(self.name)
+    multi.add_chart(self.chart, is_main=True)
+
+    # Recursively collect all referenced subflows
+    collected: Set["SubflowBuilder"] = set()
+
+    def collect_subflows(flow_builder: FlowBuilder) -> None:
+        for subflow in flow_builder._referenced_subflows:
+            if subflow not in collected:
+                collected.add(subflow)
+                if subflow.chart:
+                    multi.add_chart(subflow.chart, is_main=False)
+                    # Recursively collect subflows from this subflow
+                    if subflow._flow_builder:
+                        collect_subflows(subflow._flow_builder)
+
+    collect_subflows(self)
+    
+    # Fix any SubFlowNodes with missing targetChartId (can happen with circular references)
+    # Build a map of subflow name -> chart_id for resolution
+    name_to_chart_id: Dict[str, str] = {}
+    for chart_id, chart in multi.charts.items():
+        name_to_chart_id[chart.name] = chart_id
+    
+    # Now fix any SubFlowNodes with None targetChartId
+    for chart_id, chart in multi.charts.items():
+        for node in chart.nodes.values():
+            if isinstance(node, IRSubFlowNode) and node.target_chart_id is None:
+                # Resolve by name
+                if node.label in name_to_chart_id:
+                    node.target_chart_id = name_to_chart_id[node.label]
+    
+    return multi
+
+
+# Monkey-patch the property onto FlowBuilder
+FlowBuilder.multi_chart = _multi_chart
+
+
+@dataclass
+class _SubFlowDef:
+    """
+    Internal subflow node definition used by SubflowBuilder.
+
+    This is not part of the public API - use @Subflow decorator instead.
+    """
+
+    label: str
+    target: Optional["FlowBuilder"] = None
+    target_chart_id: Optional[str] = None
+    subflow_builder: Optional["SubflowBuilder"] = None  # For lazy chart ID resolution
+    description: Optional[str] = None
+    metadata: dict = field(default_factory=dict)
+
+    # Internal
+    _ir_node: Optional[IRSubFlowNode] = field(default=None, repr=False)
+
+    def __post_init__(self):
+        if self.description:
+            self.description = textwrap.dedent(self.description)
+
+    def _get_target_chart_id(self) -> Optional[str]:
+        """Get the target chart ID from either direct ID or from FlowBuilder or SubflowBuilder."""
+        if self.target_chart_id:
+            return self.target_chart_id
+        if self.target and self.target.chart:
+            return self.target.chart.id
+        # Lazy resolution from SubflowBuilder (handles circular references)
+        if self.subflow_builder:
+            self.subflow_builder._ensure_built()
+            if self.subflow_builder.chart:
+                return self.subflow_builder.chart.id
+        return None
+
+    def _get_or_create_node(self, flowchart: FlowChart) -> IRSubFlowNode:
+        """Get the IR node, creating it if needed."""
+        if self._ir_node is None:
+            meta = dict(self.metadata)
+            if self.description:
+                meta["description"] = self.description
+            self._ir_node = IRSubFlowNode(
+                label=self.label,
+                target_chart_id=self._get_target_chart_id(),
+                metadata=meta,
+            )
+            flowchart.add_node(self._ir_node)
+        return self._ir_node
+
+    def _reset(self):
+        """Reset for new flow building."""
+        self._ir_node = None
+
+
+class SubflowBuilder:
+    """
+    Decorator that creates a subflow which can be called directly from other flows.
+
+    This provides a cleaner API than manually creating SubFlow nodes - simply
+    decorate a flow function with @Subflow and call it like a function from
+    within another @Flow function.
+
+    Forward References & Circular Links:
+        Subflows can reference each other regardless of definition order.
+        The chart is built lazily on first use, allowing circular references.
+
+        @Subflow("Flow A")
+        def flow_a(flow):
+            flow.step("In A")
+            flow_b()  # Forward reference - flow_b defined later
+
+        @Subflow("Flow B")
+        def flow_b(flow):
+            flow.step("In B")
+            flow_a()  # Back reference - creates circular link
+
+    Usage:
+        @Subflow("Triage Flow")
+        def triage_flow(flow):
+            flow.step("Assess severity")
+            flow.step("Route to team")
+
+        @Flow("Main Flow")
+        def main_flow(flow):
+            flow.step("Identify problem")
+            triage_flow()  # Creates a SubFlowNode linking to triage_flow
+
+        # Auto-combine all referenced subflows
+        multi = main_flow.multi_chart
+
+    When triage_flow() is called inside main_flow, it:
+    1. Creates a SubFlowNode with label "Triage Flow"
+    2. Links it to triage_flow's chart
+    3. Registers triage_flow in main_flow's referenced subflows
+
+    The multi_chart property returns a MultiFlowChart with all referenced subflows.
+    """
+
+    def __init__(self, name: str):
+        self.name = name
+        self.chart: Optional[FlowChart] = None
+        self._func: Optional[Callable] = None
+        self._flow_builder: Optional[FlowBuilder] = None
+        self._decorated: bool = False
+        self._building: bool = False  # Guard against recursive builds
+        self._func_name: Optional[str] = None  # For forward reference lookup
+
+    def __call__(self, func_or_nothing: Optional[Callable] = None) -> "SubflowBuilder":
+        """
+        Handle both decoration and invocation.
+
+        When used as @Subflow("name"), receives the function to decorate.
+        When used as subflow_name() inside a @Flow, invokes as a subflow link.
+        """
+        if not self._decorated:
+            # First call - decorating a function
+            if func_or_nothing is None:
+                raise TypeError(
+                    f"@Subflow('{self.name}') must be used to decorate a function"
+                )
+            self._func = func_or_nothing
+            self._func_name = func_or_nothing.__name__
+            self._decorated = True
+            
+            # Register in global registry for forward reference resolution
+            _subflow_registry[self._func_name] = self
+            
+            # DON'T build yet - defer until first use
+            # This allows forward references between subflows
+            return self
+        else:
+            # Subsequent call - invoking as a subflow link
+            self._invoke()
+            return self
+
+    def _ensure_built(self) -> None:
+        """Build the chart if not already built. Handles circular references."""
+        if self.chart is not None:
+            return  # Already built
+        
+        if self._building:
+            # We're in a circular reference - the chart will be set after build
+            return
+        
+        if self._func is None:
+            raise RuntimeError(f"Subflow '{self.name}' has no function defined")
+        
+        self._building = True
+        try:
+            self._flow_builder = FlowBuilder(self.name)(self._func)
+            self.chart = self._flow_builder.chart
+        finally:
+            self._building = False
+
+    def _invoke(self) -> None:
+        """
+        Invoke this subflow from within another flow.
+
+        This is called when the subflow is used like a function: subflow_name()
+        It creates a SubFlowNode in the current flow that links to this subflow's chart.
+        """
+        if _current_flow is None:
+            raise RuntimeError(
+                f"Subflow '{self.name}' called outside of a @Flow function. "
+                "Subflows can only be called inside a flow definition."
+            )
+
+        # Ensure the subflow chart is built (lazy build)
+        self._ensure_built()
+
+        # Create an internal subflow definition
+        # Store subflow_builder for lazy chart ID resolution (handles circular references)
+        subflow_def = _SubFlowDef(
+            label=self.name,
+            target=self._flow_builder,
+            target_chart_id=self.chart.id if self.chart else None,
+            subflow_builder=self,  # For lazy resolution if chart_id is None
+        )
+
+        # Add the subflow node to current flow
+        _current_flow._add_subflow_node(subflow_def)
+
+        # Register this subflow as referenced by the parent flow
+        _register_subflow_reference(_current_flow, self)
+
+    def __repr__(self) -> str:
+        return f"SubflowBuilder(name={self.name!r})"
+
+
+# Alias for @Subflow decorator
+Subflow = SubflowBuilder
+
+
+# Registry to track which FlowBuilder is currently building
+_building_flow_builder: Optional[FlowBuilder] = None
+
+
+def _register_subflow_reference(ctx: FlowContext, subflow: SubflowBuilder) -> None:
+    """Register a subflow reference with the current flow being built."""
+    global _building_flow_builder
+    if _building_flow_builder is not None:
+        if subflow not in _building_flow_builder._referenced_subflows:
+            _building_flow_builder._referenced_subflows.append(subflow)
+
+
+# Add SubFlow support to FlowContext
+def _add_subflow_node(self: FlowContext, subflow_def: _SubFlowDef) -> None:
+    """Add a subflow node to the flow."""
+    ir_node = subflow_def._get_or_create_node(self.flowchart)
+    self._used_nodes.append(subflow_def)
+
+    # Connect from exits
+    self._connect_exits_to_target(ir_node.id)
+
+    # SubFlow node becomes the new exit
+    self._exits = [(ir_node, None)]
+
+
+# Monkey-patch the method onto FlowContext
+FlowContext._add_subflow_node = _add_subflow_node
